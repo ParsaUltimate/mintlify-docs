@@ -10,6 +10,29 @@ This page is the day-to-day reference for what to build and when it is done. Eac
   Durations are **engineering weeks** (40 hours/week). They assume moderate-to-high proficiency in Unity, C#, and — from Phase 6 onward — Nakama. Your actual velocity may differ; adjust sprint plans accordingly but never skip a DoD item.
 </Info>
 
+The dependency graph below shows which phases must be complete before another can begin. Phases connected in parallel (e.g., Phases 3–5 and Phase 6) can be staffed concurrently by separate team members.
+
+```mermaid
+flowchart TD
+    P1["**Phase 1** — Setup & Foundation\n2 weeks"] --> P2
+    P2["**Phase 2** — Core Domain & Gameplay\n3 weeks"] --> P3
+    P2 --> P6
+    P3["**Phase 3** — App Layer & State Machine\n2 weeks"] --> P4
+    P3 --> P5
+    P3 --> P8
+    P4["**Phase 4** — Single Player + AI\n3 weeks"] --> P5
+    P5["**Phase 5** — Pass & Play\n1 week"]
+    P6["**Phase 6** — Nakama Backend\n4 weeks"] --> P7
+    P7["**Phase 7** — Client Multiplayer\n3 weeks"]
+    P8["**Phase 8** — UI Framework\n4 weeks"] --> P9
+    P9["**Phase 9** — Board HUD & Feedback\n3 weeks"] --> P10
+    P10["**Phase 10** — Store, Settings, Profile\n1 week"] --> P11
+    P11["**Phase 11** — Tutorial & Onboarding\n1 week"]
+    P5 & P7 & P11 --> P12
+    P12["**Phase 12** — Testing, Polish & Optimisation\n4 weeks"] --> P13
+    P13["**Phase 13** — Launch Preparation\n1 week"]
+```
+
 ---
 
 ## Phases
@@ -387,7 +410,7 @@ Ship to Google Play. Run final QA smoke tests, configure production IAPs, and pr
 |------|-------------|------|
 | 13.1 | Final QA smoke-test pass on at least two physical devices (e.g., Snapdragon 665 and 720G) | 2 days |
 | 13.2 | Upload production build to Google Play Console internal test track; configure and verify all IAPs in production | 2 days |
-| 13.3 | Set up Nakama launch-day monitoring (dashboards, auto-scaling policy, on-call runbook) | 1 day |
+| 13.3 | Verify Nakama server is stable and ready for production traffic; confirm all match-related services respond correctly | 1 day |
 
 ### Dependencies
 
@@ -397,7 +420,7 @@ Phase 12 release candidate build approved.
 
 - [ ] App is live in the Google Play internal test track and installable by test accounts
 - [ ] All IAPs purchase and restore correctly in the production environment
-- [ ] Nakama monitoring dashboard is active and alerting is configured
+- [ ] Nakama server handles production traffic without errors; all match flows verified end-to-end on the live instance
 
 </Accordion>
 

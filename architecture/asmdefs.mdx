@@ -1,14 +1,16 @@
 ---
-title: "Assembly Definitions: Enforcing Layer Boundaries at Compile Time"
+title: "Assembly Definitions: Compile-Time Architecture Enforcement"
 sidebarTitle: "Asmdefs"
 description: "How SET: 3D Edition uses Unity assembly definitions to enforce Clean Architecture boundaries and prevent forbidden cross-layer references at compile time."
 ---
 
-
-
 Unity's Assembly Definition (`.asmdef`) system lets you split a project into multiple compiled assemblies instead of one monolithic blob. SET: 3D Edition uses this to make Clean Architecture boundaries **physical**: if you try to reference a layer you're not allowed to touch, the compiler refuses to build. You get a hard error at compile time — not a confusing runtime bug discovered two weeks later.
 
-This page explains the seven assemblies in the project, the rules they encode, and how the Editor tooling enforces them automatically.
+This page explains the seven assemblies planned for the project, the rules they encode, and how the Editor tooling enforces them automatically.
+
+<Info>
+All seven assemblies described here are **planned** for the pre-production project layout. The folder structure and `.asmdef` files are being established as foundational scaffolding before feature implementation begins.
+</Info>
 
 ---
 
@@ -28,10 +30,6 @@ The mental model: **asmdefs are compile-time architecture tests that run on ever
 
 ## The Seven Assemblies
 
-<Info>
-All seven assemblies are **planned** for the pre-production project layout. The folder structure and `.asmdef` files are being established as foundational scaffolding.
-</Info>
-
 | Assembly | Path | References | Purpose |
 |---|---|---|---|
 | `SET.Domain` | `_Project/Domain/` | None | Pure C# entities, value objects, domain service interfaces, enums |
@@ -50,7 +48,7 @@ All seven assemblies are **planned** for the pre-production project layout. The 
 
 This is the single most important constraint in the assembly graph. It means MonoBehaviours and ViewModels can only call interfaces declared in `SET.Application` — they never know whether the implementation behind those interfaces is Nakama, a local stub, or a future cloud service.
 
-Infrastructure implementations are **bound at runtime** by the VContainer composition root that lives in the Bootstrap scene (inside `SET.Presentation`). The Bootstrap scene is the only place in the entire codebase where a concrete infrastructure type is ever named.
+Infrastructure implementations are **bound at runtime** by the VContainer composition root that lives in the Bootstrap scene. The Bootstrap scene is the only place in the entire codebase where a concrete infrastructure type is ever named. See [Dependency Injection with VContainer](/architecture/di-vcontainer) for how this wiring works.
 
 ---
 
@@ -89,9 +87,58 @@ Solid arrows are **compile-time references** declared in the `.asmdef` file. The
 
 ---
 
+## What Lives in Each Assembly
+
+Understanding which interfaces and types belong to which assembly is essential before adding new code. The table below lists the key planned types:
+
+| Assembly | Key Planned Types |
+|---|---|
+| `SET.Domain` | `Card`, `Board`, `Deck`, `Player`, `SetResult`, `ISetValidator`, `IAIScanner`, `MatchState` |
+| `SET.Application` | `GameSession`, `IMatchOrchestrator`, `IGameStateProvider`, `GameStateSnapshot`, `IMultiplayerService`, `ILeaderboardService`, `ILocalSaveService`, `IAudioService`, `IInputHandler`, `IViewPresenter` |
+| `SET.Infrastructure` | `NakamaMultiplayerService`, `NakamaLeaderboardService`, `LocalSaveService`, `AudioService` |
+| `SET.Presentation` | `MatchViewModel`, `HudTopView`, `BoardView`, `CardView`, `TouchInputHandler`, `GameLifetimeScope` |
+
+### Application-Layer Interface Surfaces
+
+The following interfaces are declared in `SET.Application` and implemented in `SET.Infrastructure` or `SET.Presentation`. They represent the public API surface that crosses the assembly boundary at runtime via DI:
+
+**`IMultiplayerService`** — Network adapter for Nakama realtime matches:
+- `ConnectAsync(string matchId)` — establishes the realtime socket connection to a match
+- `SendClaim(int[] cardIds)` — sends a SET claim to the authoritative server
+- `Messages` — `IObservable<ServerMessage>` stream of incoming server messages
+- `Disconnect()` — cleanly closes the socket and cleans up state
+
+**`IInputHandler`** — Translates platform input into abstract game commands:
+- `CommandStream` — `IObservable<IGameCommand>` stream; downstream consumers never poll
+- `Enable()` — activates input processing (called when the board becomes interactive)
+- `Disable()` — suspends input processing during animations or locked states
+
+**`ILeaderboardService`** — Leaderboard access via Nakama:
+- `GetTopEntries(int count)` — returns the top-N leaderboard entries
+- `SubmitScore(long score)` — submits the local player's score after a match
+
+**`ILocalSaveService`** — Persistent offline storage:
+- `SaveAsync<T>(string key, T data)` — serialises and writes data to local storage
+- `LoadAsync<T>(string key)` — reads and deserialises data from local storage
+
+**`IAudioService`** — Playback control for the audio system:
+- `PlaySfx(string clipId)` — plays a one-shot sound effect
+- `PlayMusic(string trackId)` — starts looping background music
+- `SetMusicVolume(float volume)` — adjusts music volume (0–1)
+- `SetSfxVolume(float volume)` — adjusts sound effects volume (0–1)
+
+**`IViewPresenter`** — High-level screen presentation commands consumed by the Application layer:
+- `ShowBoard()` — transitions to and initialises the game board view
+- `UpdateHud(GameStateSnapshot snapshot)` — refreshes all HUD elements from the latest snapshot
+- `PlaySetAnimation(bool wasValid, int[] cardIds)` — triggers the valid or invalid SET animation
+- `ShowMatchResult(MatchResultData result)` — presents the post-match result overlay
+- `ShowToast(string message)` — displays a transient toast notification
+
+---
+
 ## What an Asmdef File Looks Like
 
-Each assembly is represented by a single `.asmdef` JSON file placed at the root of its folder. Here is the file for `SET.Application`:
+Each assembly is represented by a single `.asmdef` JSON file placed at the root of its folder. Here is the planned file for `SET.Application`:
 
 ```json
 {
@@ -126,10 +173,10 @@ The `SET.Editor` asmdef additionally includes `"includePlatforms": ["Editor"]` s
 ## Editor Validation
 
 <Info>
-The Editor validator script is **planned** (pre-production). The rule it enforces is active design intent, not yet automated.
+The Editor validator script described here is **planned** (pre-production). The rule it enforces is active design intent, not yet automated.
 </Info>
 
-A custom Editor script in `SET.Editor` runs at build time and scans every `.cs` file inside `_Project/Domain/` and `_Project/Application/`. It looks for two banned using directives:
+A custom Editor script in `SET.Editor` will run at build time and scan every `.cs` file inside `_Project/Domain/` and `_Project/Application/`. It looks for two banned using directives:
 
 ```csharp
 // These two lines are forbidden in SET.Domain and SET.Application:
@@ -138,8 +185,6 @@ using Nakama;
 ```
 
 If either is found, the script calls `BuildFailedException` and the build stops with a message identifying the exact file and line. This catches the case where a developer adds a quick `Debug.Log` to a Domain class and accidentally introduces a Unity dependency — an error that the asmdef itself won't catch, because `UnityEngine` types are always available.
-
-The validator is also wired into the CI pipeline and runs on every pull request.
 
 ---
 
@@ -153,6 +198,22 @@ could not be found (are you missing a using directive or an assembly reference?)
 ```
 
 This is **intentional**. The error message is telling you that the type is invisible from this assembly. The fix is not to add the reference — it is to move your code to the correct layer or use the interface that already exists in `SET.Application`.
+
+---
+
+## Implementation Checklist
+
+Use this checklist when adding a new assembly or adding code to an existing one:
+
+- [ ] `.asmdef` file created at the root of the layer folder with the correct `"name"` field
+- [ ] `"autoReferenced": false` on all `SET.*` assemblies
+- [ ] `"references"` list contains only the assemblies this layer is permitted to depend on (see dependency graph above)
+- [ ] No `using UnityEngine;` in `SET.Domain` or `SET.Application`
+- [ ] No `using Nakama;` in `SET.Domain` or `SET.Application`
+- [ ] `SET.Presentation` does **not** list `SET.Infrastructure` in its `"references"`
+- [ ] `SET.Editor` includes `"includePlatforms": ["Editor"]` to exclude it from Android builds
+- [ ] New interfaces that cross layer boundaries are declared in `SET.Application`, not in the implementing assembly
+- [ ] Test assemblies reference only the assemblies required by the tests they contain
 
 ---
 

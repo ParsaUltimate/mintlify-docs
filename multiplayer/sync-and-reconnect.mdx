@@ -74,19 +74,21 @@ The client tracks the last applied `seq`. If a broadcast arrives with a lower `s
 
 ## Client Mirror Model
 
-In multiplayer, the client's `GameSession` is a **read-only mirror** of the server state. It does not simulate game logic independently.
+In multiplayer, the client's `GameSession` is a **read-only mirror** of the server state. It does not simulate game logic independently. The `OnlineMatchController` is the bridge between `NakamaMultiplayerService` and `GameSession`: it subscribes to `IMultiplayerService.Messages`, translates each `ServerMessage` into an `ApplyServerStateCommand`, and dispatches it to `GameSession`.
 
 ```mermaid
 sequenceDiagram
     participant S as Nakama Server
-    participant NC as NakamaNetworkService
+    participant NMS as NakamaMultiplayerService
+    participant OMC as OnlineMatchController
     participant GS as GameSession (Mirror)
     participant VM as R3 ViewModels
     participant UI as UI Views
 
-    S-->>NC: match_state broadcast (every 50ms)
-    NC->>NC: Validate seq, discard if stale
-    NC->>GS: ApplyServerState(MatchStateMessage)
+    S-->>NMS: match_state broadcast (every 50ms)
+    NMS->>NMS: Validate seq, discard if stale
+    NMS-->>OMC: IObservable<ServerMessage> emits
+    OMC->>GS: ApplyServerStateCommand → ApplyServerState(MatchStateMessage)
     Note over GS: Atomic state replacement.\nAll fields updated in one operation.
     GS->>VM: ReactiveProperty<GameState> pushes new value
     VM->>UI: Bound UI elements update automatically
@@ -110,18 +112,28 @@ The server provides an immediate acknowledgement when a claim message is receive
 {
   "type": "claim_ack",
   "seq": 42,
-  "transactionId": "a3f9c1"
+  "data": { "transactionId": "a3f9c1" }
 }
 
 // Server → Client (after tick: true result)
 {
   "type": "match_state",
   "seq": 43,
-  "data": { ... }
+  "data": { "..." }
 }
 ```
 
-The client uses the ACK to show a "claiming…" visual state immediately, without waiting for the full tick to resolve. The worst-case delay for a confirmed result is **one tick period (50 ms) + network RTT**. For a game with p95 RTT of 150 ms, that means approximately 200 ms from tap to confirmed feedback — which is imperceptible as latency in a turn-like card game.
+The `OnlineMatchController` uses the ACK to show a "claiming…" visual state immediately, without waiting for the full tick to resolve. The worst-case delay for a confirmed result is **one tick period (50 ms) + network RTT**. For a game with p95 RTT of 150 ms, that means approximately 200 ms from tap to confirmed feedback — which is imperceptible as latency in a turn-like card game.
+
+The latency thresholds enforced in the client are:
+
+| RTT | Action |
+|---|---|
+| ≤ 150 ms | Normal play — no indicator |
+| > 150 ms | Ping indicator turns **yellow** in the HUD |
+| > 250 ms | "High latency" warning; disconnect recommendation displayed |
+
+These are Hard Boundaries and must not be changed without a formal change request.
 
 ---
 
@@ -132,13 +144,15 @@ When a client loses its WebSocket connection, the server starts a **30-second re
 ```mermaid
 sequenceDiagram
     participant Client
-    participant NakamaSDK as NakamaNetworkService
+    participant NMS as NakamaMultiplayerService
+    participant OMC as OnlineMatchController
     participant GS as GameSession
     participant UI as UI Views
     participant Server as Nakama Server
 
-    Client->>NakamaSDK: Connection drops
-    NakamaSDK->>GS: DisconnectedEvent
+    Client->>NMS: Connection drops
+    NMS-->>OMC: IObservable<ServerMessage> emits DisconnectedEvent
+    OMC->>GS: DisconnectedCommand
     GS->>UI: Show "Connection Lost" overlay\n(30-second countdown timer)
     Note over Client: Client attempts to reconnect\nusing same match ID + session token
 
@@ -146,8 +160,9 @@ sequenceDiagram
         Client->>Server: Reconnect attempt (matchId, sessionToken)
         alt Reconnect succeeds
             Server-->>Client: WebSocket re-established
-            Server-->>NakamaSDK: Full MatchState snapshot
-            NakamaSDK->>GS: ApplyServerState(MatchStateMessage)
+            Server-->>NMS: Full MatchState snapshot
+            NMS-->>OMC: IObservable<ServerMessage> emits
+            OMC->>GS: ApplyServerStateCommand → ApplyServerState(MatchStateMessage)
             GS->>UI: Dismiss overlay — reactive stream updates board, scores
         else Still failing
             Note over Client: Retry. Countdown continues.
@@ -190,6 +205,7 @@ If you are implementing the pause system, the `PauseCommand` must be gated by `I
 
 - [ ] Client disables all input immediately on `DisconnectedEvent` — do not allow speculative play while disconnected
 - [ ] `ApplyServerState()` is the **single write path** for all multiplayer game state; no other code path modifies `GameSession` fields in multiplayer mode
+- [ ] `OnlineMatchController` subscribes to `IMultiplayerService.Messages` and translates each `ServerMessage` into an `IGameCommand` dispatched to `GameSession`
 - [ ] Reconnect uses the **same match ID and session token** — do not generate a new session, as the server uses the token to restore the existing player slot
 - [ ] The 30-second countdown is shown as a **visible timer**, not just a spinner — players need to know how long they have
 - [ ] After reconnect, all client state is correct without any additional "sync" calls — `ApplyServerState` on the full snapshot is sufficient
@@ -208,6 +224,7 @@ If you are implementing the pause system, the `PauseCommand` must be gated by `I
 - **Allowing pause in online matches.** This is a Hard Boundary. A disconnect-to-pause exploit is a trivial way to game the system in competitive matches.
 - **Generating a new session token on reconnect.** The server holds the player's slot open using their original session token. A new token creates a new session and the server will treat the original slot as a continued disconnect, leading to an unrecoverable forfeit even if the player is back on the network.
 - **Showing a spinner instead of a countdown during disconnect.** A spinner communicates "loading"; a countdown communicates "you have 30 seconds to reconnect before you forfeit." Players need the countdown to make informed decisions (e.g., give up and close the app vs. wait for WiFi to stabilise).
+- **Bypassing `OnlineMatchController` to call `ApplyServerState` directly from `NakamaMultiplayerService`.** The controller is the correct translation point between network messages and game commands. Direct calls skip `seq` validation and command dispatch, causing subtle ordering bugs.
 </Warning>
 
 ---
@@ -223,5 +240,8 @@ If you are implementing the pause system, the `PauseCommand` must be gated by `I
   </Card>
   <Card title="Anti-Cheat" href="/multiplayer/anti-cheat">
     Rate limiting, server-side data ownership, and why the client cannot influence outcomes.
+  </Card>
+  <Card title="Session Lifecycle" href="/core-gameplay/session-lifecycle">
+    How GameSession manages state transitions across all three game modes.
   </Card>
 </CardGroup>

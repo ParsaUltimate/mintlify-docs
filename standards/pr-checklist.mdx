@@ -12,6 +12,21 @@ Work through every section before marking a PR as **Ready for Review**. A PR sub
   If any item in this checklist cannot be ticked, the PR is not ready to merge. No exceptions are granted by "we'll fix it in a follow-up." The follow-up never comes.
 </Warning>
 
+The diagram below shows the gate sequence a PR must pass in order. Each gate depends on the previous one — a PR blocked at Architecture cannot be reviewed for Tests until the architectural violation is resolved.
+
+```mermaid
+flowchart LR
+    A["📝 Naming\n& Style"] --> B["🏛️ Architecture\n& Layer Boundaries"]
+    B --> C["💉 Dependency\nInjection"]
+    C --> D["⚡ Reactive UI"]
+    D --> E["🎮 Game Logic"]
+    E --> F{"Multiplayer\nChanges?"}
+    F -- Yes --> G["🌐 Multiplayer\nChecks"]
+    F -- No --> H
+    G --> H["🧪 Tests"]
+    H --> I["✅ Definition\nof Done"]
+```
+
 ---
 
 ## Naming & Style

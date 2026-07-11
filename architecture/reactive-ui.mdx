@@ -120,6 +120,58 @@ Views never call `GameSession` methods directly. Input becomes a command and is 
 
 ---
 
+## Key Interface: IInputHandler
+
+Input in SET: 3D Edition is abstracted through `IInputHandler`, declared in `SET.Application` and implemented by `TouchInputHandler` in `SET.Presentation`. This keeps the Application layer completely independent of Unity's input system.
+
+```csharp
+// SET.Application — interface declaration
+public interface IInputHandler
+{
+    /// <summary>Observable stream of commands produced by player input.</summary>
+    IObservable<IGameCommand> CommandStream { get; }
+
+    /// <summary>Activates input processing — call when the board becomes interactive.</summary>
+    void Enable();
+
+    /// <summary>Suspends input processing — call during animations or locked states.</summary>
+    void Disable();
+}
+```
+
+`TouchInputHandler` translates Unity touch events into `SelectCardCommand`, `ClaimSelectedCommand`, and other `IGameCommand` implementations, then pushes them onto `CommandStream`. `GameSession` subscribes once at startup — it never polls for input.
+
+---
+
+## Key Interface: IViewPresenter
+
+High-level screen transitions and game-board state updates are coordinated through `IViewPresenter`, declared in `SET.Application`:
+
+```csharp
+// SET.Application — interface declaration
+public interface IViewPresenter
+{
+    /// <summary>Transitions to and initialises the game board view.</summary>
+    void ShowBoard();
+
+    /// <summary>Refreshes all HUD elements from the latest game state snapshot.</summary>
+    void UpdateHud(GameStateSnapshot snapshot);
+
+    /// <summary>Triggers the valid or invalid SET card animation.</summary>
+    void PlaySetAnimation(bool wasValid, int[] cardIds);
+
+    /// <summary>Presents the post-match result overlay with final scores and stats.</summary>
+    void ShowMatchResult(MatchResultData result);
+
+    /// <summary>Displays a transient toast notification (e.g. "No SET — dealing more cards").</summary>
+    void ShowToast(string message);
+}
+```
+
+`ScreenPresenter` in `SET.Presentation` implements this interface. The Application layer calls it to trigger screen-level events without having any knowledge of Unity's scene system or uGUI components.
+
+---
+
 ## Example ViewModel
 
 ```csharp
@@ -173,7 +225,7 @@ public class HudTopView : MonoBehaviour
     MatchViewModel _vm;
     readonly CompositeDisposable _disposables = new();
 
-    // VContainer calls this before Start() — see di-vcontainer.mdx
+    // VContainer calls this before Start() — see di-vcontainer page
     [Inject]
     public void Construct(MatchViewModel vm) => _vm = vm;
 
@@ -308,6 +360,23 @@ public void Dispose() => _disposables.Dispose();
 
 ---
 
+## Implementation Checklist
+
+Use this checklist when adding a new reactive binding or ViewModel:
+
+- [ ] ViewModel is a plain C# class with no Unity (`MonoBehaviour`, `GameObject`) dependencies
+- [ ] Every `ReactiveProperty<T>` is declared on the ViewModel, not on the View
+- [ ] Every `Subscribe()` call is followed by `.AddTo(_disposables)`
+- [ ] Every `MonoBehaviour` View has `OnDestroy() => _disposables.Dispose()`
+- [ ] Every pure C# ViewModel implements `IDisposable` and calls `_disposables.Dispose()` in `Dispose()`
+- [ ] Subscriptions to ViewModel properties are set up in `Start()`, never in `Awake()` (injection runs between the two)
+- [ ] Nakama/network callbacks use `.ObserveOnMainThread()` before any state or UI update
+- [ ] `DistinctUntilChanged` applied on each subscription keyed to the specific field it cares about
+- [ ] No `Update()` polling for any game state — all updates are subscription-driven
+- [ ] Views never call `GameSession` directly — input routes through `IInputHandler.CommandStream`
+
+---
+
 ## Banned Patterns
 
 | Banned | Why | Replacement |
@@ -344,7 +413,7 @@ public void Dispose() => _disposables.Dispose();
   <Card title="Game Session Lifecycle" icon="rotate" href="/core-gameplay/session-lifecycle">
     How GameSession emits state snapshots and events through the IGameStateProvider interface.
   </Card>
-  <Card title="UI Screen Flow" icon="display" href="/architecture/overview">
-    The full screen hierarchy and navigation model built on top of this reactive foundation.
+  <Card title="Engineering Standards & Patterns" icon="book" href="/standards/patterns">
+    The full pattern toolbox and code review checklist for reactive pipelines.
   </Card>
 </CardGroup>

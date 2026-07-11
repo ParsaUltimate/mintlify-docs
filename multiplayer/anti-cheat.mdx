@@ -18,7 +18,7 @@ This page documents the specific mechanisms that enforce this, so that when you 
 
 The most important security property of the system is also the simplest: **the client sends intent, not outcomes**.
 
-When a player taps three cards, the client sends their IDs to the server. It does not send "these cards form a valid Set." It does not pre-validate and skip sending invalid claims. The server runs `SetValidator` on every claim independently of what the client thinks. The server's result is the result.
+When a player taps three cards, the client sends their IDs to the server via `IMultiplayerService.SendClaim`. It does not send "these cards form a valid Set." It does not pre-validate and skip sending invalid claims. The server runs `SetValidator` on every claim independently of what the client thinks. The server's result is the result.
 
 A modified client that injects a "valid" claim message for three cards that do not form a Set will receive the same "invalid" response from the server as an honest client would. There is nothing the client can send to change the server's validation outcome.
 
@@ -29,7 +29,7 @@ A modified client that injects a "valid" claim message for three cards that do n
 | Client **Can** | Client **Cannot** |
 |---|---|
 | Select cards visually and highlight them | Call `SetValidator` to pre-check in multiplayer |
-| Send a claim intent (card IDs) to the server | Modify board state locally in multiplayer |
+| Send a claim intent (card IDs) to the server via `OnlineMatchController` | Modify board state locally in multiplayer |
 | Show a "claiming…" UI state before confirmation | Decide claim resolution order |
 | Receive and display server-broadcast state | Affect other players' scores or penalties |
 | Play animations triggered by `ApplyServerState` | Grant itself cosmetic items |
@@ -72,6 +72,18 @@ sequenceDiagram
 ```
 
 The only edge case — two messages with identical server-received timestamps — is resolved by **lower session ID**, a deterministic tiebreaker that is documented, tested, and consistent.
+
+---
+
+## The OnlineMatchController as a Security Boundary
+
+The `OnlineMatchController` enforces a clean separation between the network and the game session, which also serves as a security boundary. `GameSession` never directly holds a reference to `IMultiplayerService`, which means:
+
+- Game logic code cannot inadvertently call `SendClaim` with a pre-validated result.
+- There is no code path where the session can inspect server messages before the controller translates them — raw `ServerMessage` types never appear in gameplay code.
+- A developer cannot shortcut the flow by having `GameSession` write state outside of `ApplyServerState`, because the session's multiplayer interface only exposes `ApplyServerState` and `SendClaim`.
+
+This architectural enforced ignorance is the structural complement to the server-side authority model.
 
 ---
 
@@ -156,6 +168,7 @@ Any of these require a formal Change Request before engineering work begins.
 ## Implementation Checklist
 
 - [ ] `IOnlineGameSession` has **no `ValidateSet` method** — only `SendClaim`. Verify this before writing any multiplayer game flow code.
+- [ ] `OnlineMatchController` is the only code that calls `IMultiplayerService.SendClaim` and subscribes to `IMultiplayerService.Messages` — `GameSession` never holds a reference to `IMultiplayerService`
 - [ ] Rate limiting is configured in the Nakama match handler before the claim validation path
 - [ ] `LocalSaveService` computes and verifies the HMAC signature on every load and save
 - [ ] IAP receipt validation runs server-side via Google Play's verification API before any Nakama Storage grant
@@ -175,6 +188,7 @@ Any of these require a formal Change Request before engineering work begins.
 - **Skipping rate limiting on claim messages.** Without rate limiting, a bot can send thousands of claims per second, saturating the tick's processing queue and causing server-side lag for all players in the match.
 - **Granting cosmetic ownership on the client.** Even if you trust the purchase flow, a client-side grant is trivially bypassed with a local save edit. The server must always be the granting authority.
 - **Assuming a valid-looking claim is valid.** The server must validate every claim from first principles using `SetValidator`, regardless of how plausible the claim looks. Never short-circuit server validation.
+- **Bypassing `OnlineMatchController` to call `GameSession.ApplyServerState` directly from networking code.** The controller is the correct translation point. Direct calls break the security boundary by letting raw network data into the game session without the command translation layer.
 </Warning>
 
 ---
@@ -183,12 +197,15 @@ Any of these require a formal Change Request before engineering work begins.
 
 <CardGroup cols={2}>
   <Card title="Authority Model" href="/multiplayer/authority-model">
-    The IMultiplayerService contract, why Nakama was chosen, and the IOnlineGameSession interface design.
+    The IMultiplayerService contract, the OnlineMatchController pattern, and the IOnlineGameSession interface design.
   </Card>
   <Card title="Match Lifecycle" href="/multiplayer/match-lifecycle">
     The full match flow including simultaneous claim resolution and post-match MMR updates.
   </Card>
   <Card title="Sync & Reconnect" href="/multiplayer/sync-and-reconnect">
     Full-state broadcasts, the client mirror model, and the 30-second reconnect window.
+  </Card>
+  <Card title="Architecture Layers" href="/architecture/layers">
+    How the Infrastructure assembly boundary prevents Nakama SDK types from leaking into gameplay code.
   </Card>
 </CardGroup>

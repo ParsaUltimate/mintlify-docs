@@ -23,9 +23,9 @@ flowchart TD
     C -- Private Room --> F[Host generates room code\nGuests enter code to join]
     C -- Tournament --> G[Server-scheduled bracket\nup to 8 players]
     D & E & F & G --> H[Server creates authoritative match\nGenerates deck with server RNG\nAssigns session IDs]
-    H --> I[Clients connect via WebSocket\nNakamaNetworkService.ConnectAsync]
+    H --> I[Clients connect via WebSocket\nNakamaMultiplayerService.ConnectAsync]
     I --> J[Server broadcasts initial board state\nto all clients]
-    J --> K[GameSession enters mirror mode\nApplyServerState on initial snapshot]
+    J --> K[OnlineMatchController receives snapshot\nIssues ApplyServerStateCommand to GameSession]
     K --> L[Input enabled — match begins]
     L --> M{{In-Match Play Loop\n20 Hz server tick}}
     M --> N{Deck empty AND\nno Set on board?}
@@ -48,6 +48,8 @@ Players enter a queue via `IMatchmakingService`. The four queue types differ in 
 | **Private Room** | Host generates code; guests enter it | 2–4 | Host configures rules (board size, timed toggle) |
 | **Tournament** | Server-scheduled bracket | Up to 8 | Scheduled events only; no user-created brackets |
 
+Online matches support **2–4 players**. Pass & Play supports 2–8 players on a single device, but that limit does not apply to online modes. Tournament mode allows up to 8 players in server-scheduled brackets only.
+
 While queuing, the client shows the **Matchmaking Queue Modal**: a spinner, an estimated wait time, and a **Cancel** button that calls `IMatchmakingService.CancelQueue()`. The modal must be dismissible at any point before the match is created — if the server creates the match while the player is cancelling, the client must leave the match gracefully.
 
 ---
@@ -62,7 +64,7 @@ Once the server has paired enough players, it:
 4. Assigns each player a session ID (used as a tiebreaker for simultaneous claims).
 5. Broadcasts the full initial `MatchState` — including all 12 card IDs and their positions — to every client over the WebSocket.
 
-The client receives this snapshot and calls `GameSession.ApplyServerState()`, transitioning the session into **mirror mode**. Input is disabled until the initial state is fully applied and the deal animation completes. This prevents any player from tapping cards before the board is guaranteed to be in sync.
+The client's `NakamaMultiplayerService` receives this snapshot and emits it on `IMultiplayerService.Messages`. The `OnlineMatchController` subscribes to `Messages`, translates the snapshot into an `ApplyServerStateCommand`, and `GameSession` applies it, transitioning into **mirror mode**. Input is disabled until the initial state is fully applied and the deal animation completes. This prevents any player from tapping cards before the board is guaranteed to be in sync.
 
 <Tip>
 Never enable player input until the client has received and applied the initial `MatchState` from the server. Enabling input on scene load before the first server snapshot arrives will cause card taps to reference an empty or stale board.
@@ -72,7 +74,7 @@ Never enable player input until the client has received and applied the initial 
 
 ## Phase 3 — In-Match Play Loop
 
-The server runs at **20 Hz (one tick every 50 ms)**. Each tick is the atomic unit of match progression.
+The server runs at **20 Hz (one tick every 50 ms)**. This rate was chosen to balance claim-resolution responsiveness against server CPU cost for a turn-like real-time card game — 50 ms latency is imperceptible to players. Each tick is the atomic unit of match progression.
 
 ### Client-Side Input Path
 
@@ -80,19 +82,21 @@ The server runs at **20 Hz (one tick every 50 ms)**. Each tick is the atomic uni
 sequenceDiagram
     participant Player
     participant IH as InputHandler
-    participant GS as GameSession (Mirror)
-    participant NC as NakamaNetworkService
+    participant OMC as OnlineMatchController
+    participant NMS as NakamaMultiplayerService
     participant Server as Nakama Match Handler
+    participant GS as GameSession (Mirror)
 
     Player->>IH: Tap card 1, card 2, card 3
-    IH->>GS: ClaimSelectedCommand(cardIds)
-    GS->>GS: Enter "claiming" visual state\n(cards locked, spinner glow)
-    GS->>NC: IMultiplayerService.SendClaim([12, 37, 58])
-    NC->>Server: WebSocket: match_claim { seq: 42, cardIds: [12, 37, 58] }
+    IH->>OMC: ClaimSelectedCommand(cardIds)
+    OMC->>GS: Enter "claiming" visual state\n(cards locked, spinner glow)
+    OMC->>NMS: IMultiplayerService.SendClaim([12, 37, 58])
+    NMS->>Server: WebSocket: { type: "match_claim", seq: 42, data: { cardIds } }
     Note over Server: Claim queued until next tick
     Server->>Server: Tick N: process queue, validate, resolve
-    Server-->>NC: match_state { seq: 43, board, scores, deckCount }
-    NC-->>GS: ApplyServerState(MatchStateMessage)
+    Server-->>NMS: { type: "match_state", seq: 43, data: { board, scores, ... } }
+    NMS-->>OMC: IObservable<ServerMessage> emits
+    OMC->>GS: ApplyServerStateCommand → ApplyServerState(MatchStateMessage)
     GS-->>Player: R3 stream → score update, board update, VFX
 ```
 
@@ -107,6 +111,8 @@ Each 20 Hz tick on the Nakama match handler:
 5. **Broadcast** a complete `MatchState` snapshot to all connected clients.
 
 ### Network Message Format
+
+Every message between client and server uses a `{type, seq, data}` JSON envelope:
 
 ```json
 // Client → Server (claim intent)
@@ -161,7 +167,7 @@ sequenceDiagram
 
 **Exact-millisecond ties** (two messages with identical server-received timestamps) are broken deterministically by **lower session ID**. This is documented and tested — it is not arbitrary behaviour.
 
-The client **must not** assume its claim succeeded based on its own validation. After calling `SendClaim`, the session enters a "claiming…" visual state and waits for the server's `match_state` response. If the cards are gone by the time the server processes the claim, the response will carry no score change and potentially a penalty — the UI must handle this gracefully.
+The client **must not** assume its claim succeeded based on its own validation. After calling `SendClaim`, the `OnlineMatchController` puts the UI into a "claiming…" visual state and waits for the server's `match_state` response. If the cards are gone by the time the server processes the claim, the response will carry no score change and potentially a penalty — the UI must handle this gracefully.
 
 ---
 
@@ -200,6 +206,7 @@ Use this checklist when implementing each phase:
 
 - [ ] Matchmaking flow triggers **before** the GameBoard scene loads — the scene must not appear until `ConnectAsync` succeeds and the initial `MatchState` is received
 - [ ] Initial board state is received from the server before player input is enabled
+- [ ] `OnlineMatchController` subscribes to `IMultiplayerService.Messages` and translates each `ServerMessage` into an `IGameCommand` for `GameSession`
 - [ ] `SendClaim` immediately puts the UI into a "claiming…" visual state — do **not** play a success animation before receiving the server's confirmation
 - [ ] `GameSession.ApplyServerState()` updates all state atomically — no partial updates mid-frame
 - [ ] The "cards already gone" case (second simultaneous claimant) is handled: the UI shows the claim was invalid, not stuck in "claiming…"
@@ -218,6 +225,7 @@ Use this checklist when implementing each phase:
 - **Not handling the "cards already gone" case.** When two players claim the same Set and the second claimant's claim arrives after the board has changed, the server sends an invalid result. If the client only handles explicit "invalid Set" (wrong attributes) and not "invalid because cards are gone," the UI can get stuck or show the wrong feedback.
 - **Enabling input before the initial `MatchState` is received.** The board does not exist yet on the client. Card taps will reference null or stale data.
 - **Treating `SendClaim` as fire-and-forget.** The sequence number must be tracked, and the client must handle both confirmation and rejection for every claim it sends.
+- **Having `GameSession` call `IMultiplayerService` directly.** All network orchestration goes through `OnlineMatchController`. The session receives `IGameCommand`s only.
 </Warning>
 
 ---
@@ -233,5 +241,8 @@ Use this checklist when implementing each phase:
   </Card>
   <Card title="Anti-Cheat" href="/multiplayer/anti-cheat">
     Rate limiting, server-side data ownership, and why the client cannot influence outcomes.
+  </Card>
+  <Card title="Session Lifecycle" href="/core-gameplay/session-lifecycle">
+    How GameSession manages state transitions across all three game modes.
   </Card>
 </CardGroup>

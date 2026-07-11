@@ -16,6 +16,19 @@ New contributors often lose hours to a mismatched Unity version, a missing Git L
 
 ---
 
+## Key responsibilities
+
+This page owns three outcomes for every new contributor:
+
+| Responsibility | Detail |
+|---------------|--------|
+| **Tool verification** | Confirm every required tool is installed at the correct version before you open the project |
+| **Account access** | Ensure GitHub repository access is granted before any clone attempt |
+| **Knowledge baseline** | Give contributors an honest assessment of what they need to know versus what they can learn on the job |
+| **Environment validation** | Walk through a deterministic setup sequence that ends with a compilable project |
+
+---
+
 ## Required software
 
 | Tool | Version / Notes | Why it's needed |
@@ -109,7 +122,7 @@ Domain and Application layer work requires nothing beyond C# and Unity's test ru
   </Step>
 
   <Step title="Load the Bootstrap scene and press Play">
-    Open `Assets/_Project/Scenes/Bootstrap.unity` and press **Play**. Single-player and Pass & Play modes are fully local — they work without a Nakama server. You should see the main menu load.
+    Open `Assets/_Project/Scenes/Bootstrap.unity` and press **Play**. The project will compile and run. Because SET: 3D Edition is pre-production, you may see stub scenes or an empty Bootstrap flow rather than a polished main menu — that is expected. Single-player and Pass & Play modes are **planned** to run fully locally without a Nakama server; online multiplayer will require one.
 
     If you see compile errors instead, check the [Common mistakes](#common-mistakes) section below.
   </Step>
@@ -134,6 +147,20 @@ Domain and Application layer work requires nothing beyond C# and Unity's test ru
 
 ---
 
+## Implementation checklist
+
+Before you consider your environment ready, confirm every item below:
+
+- [ ] Unity Hub installed and Unity 2022.3 LTS listed under **Installs** with Android Build Support module enabled
+- [ ] `git lfs install` run at least once on this machine (check with `git lfs version`)
+- [ ] Repository cloned and `git lfs pull` completed without errors
+- [ ] Project opens in Unity without compile errors (first import may take several minutes)
+- [ ] Bootstrap scene (`Assets/_Project/Scenes/Bootstrap.unity`) loads without console errors
+- [ ] IDE configured with Unity plugin and `.asmdef` awareness (Rider recommended)
+- [ ] Docker installed if you plan to work on Infrastructure/multiplayer features
+
+---
+
 ## Common mistakes
 
 <Warning>
@@ -141,7 +168,7 @@ Domain and Application layer work requires nothing beyond C# and Unity's test ru
 
   - **Forgetting `git lfs pull`** — Unity will log import errors for every texture and audio file tracked by LFS. Always run `git lfs pull` immediately after cloning or switching branches.
   - **Using the wrong Unity version** — even a minor patch mismatch (e.g., 2022.3.10 vs 2022.3.45) can cause project upgrade dialogs that corrupt local settings. Match the version in `ProjectSettings/ProjectVersion.txt` exactly.
-  - **Trying to test multiplayer without Nakama running** — online match features will time out silently. Single-player works fully offline; don't block your work on Nakama being available.
+  - **Trying to test multiplayer without Nakama running** — online multiplayer features are planned to require a running Nakama server. Single-player and Pass & Play are planned to run fully offline; don't block Domain or Application layer work on Nakama being available.
   - **Adding the Android Build Support module after the fact** — if you installed Unity 2022.3 LTS without Android Build Support, add it through Unity Hub's **Installs → Add Modules** before opening the project.
 </Warning>
 

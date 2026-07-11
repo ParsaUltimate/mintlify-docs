@@ -1,7 +1,7 @@
 ---
-title: "Game Session Lifecycle: State Machine and Match Orchestration"
+title: "Session Lifecycle: State Machine and Orchestration"
 sidebarTitle: "Session Lifecycle"
-description: "How GameSession orchestrates the match state machine, processes commands, emits reactive state snapshots, handles scoring, and drives the full match lifecycle."
+description: "How GameSession orchestrates the match state machine, processes player commands, emits reactive snapshots, handles scoring, and drives the match lifecycle."
 ---
 
 `GameSession` is the central orchestrator of a match in SET: 3D Edition. Every rule, every state transition, every score change, and every end-game condition flows through it. Nothing in the domain layer modifies game state except through `GameSession`. Understanding its structure — the commands it accepts, the states it moves through, and the events it emits — is the foundation for building or debugging any game-mode feature.
@@ -62,7 +62,8 @@ public enum MatchState
     CardSelected1,      // Exactly one card selected.
     CardSelected2,      // Exactly two cards selected.
     Validating,         // Third card selected; validation in progress.
-                        // In SP: instant. In MP (planned): waiting for server.
+                        // In SP: instant. In MP (planned): includes WaitingForServer
+                        // sub-state while the Nakama server processes the claim.
     ValidSetAnim,       // Valid Set confirmed; animation playing. Input LOCKED.
     InvalidSetAnim,     // Invalid Set confirmed; feedback playing. Input LOCKED.
     RefillAnim,         // Board refilling after valid Set. Input LOCKED.
@@ -72,6 +73,10 @@ public enum MatchState
 ```
 
 Four states are **input-locked**: `ValidSetAnim`, `InvalidSetAnim`, `RefillAnim`, and `ExpandBoardAnim`. While the session is in any of these states, `HandleCommand` silently discards incoming commands (logs a warning, does not throw).
+
+<Note>
+**`WaitingForServer` (online play, planned).** In the online multiplayer design, `Validating` encompasses an inner sub-state called `WaitingForServer`. When the player selects a third card, the session enters `Validating` and the claim is dispatched to the Nakama server. The session stays in `Validating / WaitingForServer` — cards highlighted, input locked — until the server broadcasts its verdict. The session then transitions to `ValidSetAnim` or `InvalidSetAnim` based on the server response. There is no separate top-level enum value for this sub-state; it is tracked internally by `OnlineMatchController`.
+</Note>
 
 ---
 
@@ -119,8 +124,18 @@ public interface IGameCommand
     PlayerId PlayerId { get; }
 }
 
-/// <summary>Player taps a card to select or deselect it.</summary>
+/// <summary>Player taps an unselected card to add it to the current selection.</summary>
 public class SelectCardCommand : IGameCommand
+{
+    public PlayerId PlayerId { get; }
+    public int      SlotIndex { get; }
+}
+
+/// <summary>
+/// Player taps an already-selected card to remove it from the selection.
+/// Transitions: CardSelected2 → CardSelected1, or CardSelected1 → BoardIdle.
+/// </summary>
+public class DeselectCardCommand : IGameCommand
 {
     public PlayerId PlayerId { get; }
     public int      SlotIndex { get; }
@@ -188,6 +203,40 @@ public sealed class GameStateSnapshot
 ```
 
 Every property is read-only. `BoardSnapshot` and `PlayerSnapshot` are also immutable DTOs. `GameSession` constructs a fresh snapshot after every state change and pushes it — it never reuses or mutates the previous snapshot.
+
+---
+
+## GameRules Value Object
+
+`GameRules` is an immutable configuration object created before `StartMatch` is called. It never changes during a match.
+
+```csharp
+/// <summary>
+/// Immutable match configuration. All fields are set at match creation and
+/// are read-only for the lifetime of the session.
+/// </summary>
+public sealed class GameRules
+{
+    /// <summary>Starting slot count — 12, 15, or 18. Default: 12.</summary>
+    public int         InitialBoardSize   { get; }
+
+    /// <summary>Hard cap on board slots. Always 21 — cannot be changed per match.</summary>
+    public int         MaxBoardSize       { get; }  // = 21
+
+    /// <summary>Consequence for submitting an invalid Set.</summary>
+    public PenaltyMode PenaltyMode        { get; }  // None | Time | Point
+
+    /// <summary>When true, the match has a countdown timer.</summary>
+    public bool        IsTimed            { get; }
+
+    /// <summary>Countdown duration in seconds. Ignored when IsTimed == false.</summary>
+    public float       TimeLimitSeconds   { get; }
+}
+
+public enum PenaltyMode { None, Time, Point }
+```
+
+`MaxBoardSize` is a **constant 21** — it is exposed as a property so that code consuming `GameRules` does not need to hard-code the magic number, but its value is always 21 and cannot be overridden. `InitialBoardSize` can be 12, 15, or 18 (matching the preset configurations in the data layer).
 
 ---
 

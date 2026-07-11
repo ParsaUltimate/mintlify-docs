@@ -16,6 +16,18 @@ Your first contributions to SET: 3D Edition should build confidence in the archi
 
 ---
 
+## Key responsibilities
+
+Every first-contribution task on this page serves one of three outcomes:
+
+| Responsibility | Detail |
+|---------------|--------|
+| **Architecture internalization** | Understand which layer owns which type before writing any production code |
+| **Core logic implementation** | Build and test `SetValidator`, `Deck`, and `Board` — the foundation every other system depends on (**Planned**) |
+| **Test coverage** | Leave behind an EditMode test suite that enforces correct behaviour for all future contributors |
+
+---
+
 ## Philosophy: start in the Domain, prove with tests
 
 The Domain layer is pure C# — no `UnityEngine`, no Nakama, no R3. It compiles and runs in any .NET environment. This means you can write and run unit tests from Unity's EditMode test runner in seconds, without entering Play mode.
@@ -25,6 +37,29 @@ Starting here serves two purposes:
 2. **You leave behind a test suite** that protects everyone who comes after you.
 
 Once your Domain tests pass, you'll have the vocabulary and the context to understand what `GameSession` in the Application layer is doing — and why the reactive streams flowing into Presentation look the way they do.
+
+### Where your first tasks sit in the architecture
+
+```mermaid
+graph TD
+    Domain["SET.Domain ← Start here\nSetValidator · Deck · Board\n(pure C#, no deps)"]
+    App["SET.Application\nGameSession · Commands\n(read only at first)"]
+    Infra["SET.Infrastructure\nNakama · LocalSave\n(out of scope for now)"]
+    Pres["SET.Presentation\nViews · ViewModels\n(out of scope for now)"]
+
+    App --> Domain
+    Infra --> Domain
+    Infra --> App
+    Pres --> Domain
+    Pres --> App
+
+    style Domain fill:#2d6a4f,color:#fff
+    style App fill:#555,color:#ccc
+    style Infra fill:#555,color:#ccc
+    style Pres fill:#555,color:#ccc
+```
+
+Your first tasks live entirely inside `SET.Domain` (green). The Application layer is read-only study material for now. Infrastructure and Presentation are out of scope until Domain and Application are solid.
 
 ---
 
@@ -110,6 +145,20 @@ Once your Domain tests pass, you'll have the vocabulary and the context to under
     - How it manages the `MatchState` enum transitions
     - How it emits state and events as R3 observables through `IGameStateProvider`
 
+    The constructor signature establishes the dependency contract (**Planned**):
+
+    ```csharp
+    public sealed class GameSession : IMatchOrchestrator, IGameStateProvider
+    {
+        public GameSession(
+            ISetValidator validator,
+            IAIScanner    aiScanner)
+        { ... }
+    }
+    ```
+
+    `GameSession` never calls `new SetValidator()` or `new AIScanner()` directly — VContainer supplies the concrete implementations through constructor injection at startup.
+
     When you're ready to contribute Application-layer work, start by adding test coverage for `GameSession` state transitions using NSubstitute mocks for `ISetValidator` and `IAIScanner`.
   </Step>
 </Steps>
@@ -183,17 +232,20 @@ Keep the scenario segment specific enough to diagnose a failure without opening 
 
 ---
 
-## PR checklist for Domain work
+## Implementation checklist
 
-Before you mark a pull request ready for review, confirm:
+Before you mark a pull request ready for review, confirm every item below:
 
 - [ ] All new and existing EditMode tests pass (run via **Window → General → Test Runner** in Unity)
 - [ ] No `using UnityEngine;` anywhere in `SET.Domain` or `SET.Application`
 - [ ] No `using Nakama;` anywhere in `SET.Domain` or `SET.Application`
-- [ ] Naming conventions followed — `MethodName_Scenario_ExpectedBehavior` for tests
+- [ ] No `using R3;` anywhere in `SET.Domain`
+- [ ] Test methods follow the `MethodName_Scenario_ExpectedBehavior` naming convention
 - [ ] `SetResult` returned for invalid input; no exceptions thrown from domain services
 - [ ] Value objects (`CardAttributes`, `SetResult`) are immutable (`readonly struct`)
-- [ ] All test methods have clear, descriptive names
+- [ ] `SetValidator` is stateless — no instance fields mutated between calls
+- [ ] `Deck` shuffle with a fixed seed is deterministic (tested with two identical runs)
+- [ ] `Board` expansion and contraction rules tested at boundary values (12, 15, 18, 21 cards)
 
 ---
 

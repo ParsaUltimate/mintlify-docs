@@ -51,8 +51,9 @@ public readonly struct CardSlot
 /// </summary>
 public sealed class Board
 {
-    private const int MinSlots = 12;
-    private const int MaxSlots = 21;
+    private const int MinSlots    = 12;
+    private const int MaxSlots    = 21;
+    private const int SlotsPerRow =  4;   // grid always has exactly 4 columns
 
     public IReadOnlyList<CardSlot> Slots { get; }   // always MinSlots..MaxSlots entries
 

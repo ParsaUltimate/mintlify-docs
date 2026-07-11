@@ -10,6 +10,28 @@ Consistent conventions mean any team member can open any file and understand it 
   These are not style suggestions — they are production requirements. CI treats analyzer violations as build errors. A PR that introduces a naming violation, a `#region`, or a public field on an entity **will not merge**.
 </Warning>
 
+The diagram below shows which convention categories apply to which architectural layers. Conventions marked in all layers are universal; those marked only in Presentation apply exclusively to Unity `MonoBehaviour` code.
+
+```mermaid
+flowchart LR
+    subgraph Universal["Universal — All Layers"]
+        N["Naming Conventions"]
+        F["Formatting Rules"]
+        C["Class & Interface Design"]
+        M["Method Rules"]
+        E["Error Handling"]
+    end
+    subgraph UnityOnly["Presentation Layer Only"]
+        U["Unity-Specific Rules\n(MonoBehaviour, Inspector,\nScriptableObjects)"]
+        R["Reactive Programming (R3)\nSubscription Disposal"]
+    end
+    Universal --> Domain["SET.Domain"]
+    Universal --> App["SET.Application"]
+    Universal --> Infra["SET.Infrastructure"]
+    Universal --> Pres["SET.Presentation"]
+    UnityOnly --> Pres
+```
+
 ---
 
 ## Naming Conventions

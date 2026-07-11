@@ -10,6 +10,18 @@ Understanding which layer owns a given type — and which layers it is forbidden
   **Pre-production** — The interfaces and class signatures shown here reflect the intended design. Concrete implementations may be stubs or not yet exist. Check the repository for current implementation status.
 </Warning>
 
+## Key responsibilities
+
+This page owns three outcomes for every engineer reading it:
+
+| Responsibility | Detail |
+|---------------|--------|
+| **Ownership contracts** | Define precisely what each layer may contain, what it must not contain, and why |
+| **Interface literacy** | Show every cross-layer interface so contributors know exactly what to implement and what to consume |
+| **Communication patterns** | Document how state and commands flow at runtime so no one invents an ad-hoc coupling |
+
+---
+
 ## Why layer ownership matters
 
 Without clear ownership, coupling accumulates in ways that are easy to introduce and expensive to remove. A MonoBehaviour that reaches directly into `NakamaMultiplayerService` works fine until you need to test that MonoBehaviour — at which point you discover you can't do it without a running Nakama server. A Domain class that references `UnityEngine.Debug` works fine until you try to port the validation logic to a Nakama server runtime — at which point it won't compile.
@@ -30,6 +42,19 @@ The innermost layer. Contains everything needed to represent and validate a game
 | `ValueObjects/` | `CardAttributes`, `GameRules`, `SetResult`, `CardId` |
 | `Services/` | `ISetValidator`, `IAIScanner` |
 | `Enums/` | `Number`, `Shape`, `Color`, `Shading`, `MatchState`, `PenaltyMode` |
+
+#### ISetValidator — the core domain service *(Planned)*
+
+```csharp
+public interface ISetValidator
+{
+    SetResult Validate(IReadOnlyList<Card> threeCards);
+    IReadOnlyList<Card[]> FindAllSets(IReadOnlyList<Card> boardCards);
+    bool AnySetExists(IReadOnlyList<Card> boardCards);
+}
+```
+
+`Validate` checks whether exactly three cards form a valid Set. `FindAllSets` returns every valid Set on the current board — used by the hint system and AI scanner. `AnySetExists` is a fast early-exit check used before board expansion decisions.
 
 ### Rules
 
@@ -136,7 +161,7 @@ Implements every interface defined in Application that requires an external SDK,
 | `LocalSave/` | `LocalSaveService` |
 | `Platform/` | `PlatformService` *(Google Play Games Services)* |
 | `Audio/` | `AudioService` |
-| `Serialization/` | JSON converters, save-data DTOs, migration helpers |
+| `Serialization/` | JSON converters, save-data DTOs |
 
 ### Key adapter interfaces
 

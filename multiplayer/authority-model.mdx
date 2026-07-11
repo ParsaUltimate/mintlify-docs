@@ -1,5 +1,5 @@
 ---
-title: "Nakama Authority Model: Server-Side Set Validation"
+title: "Server Authority Model: SET: 3D Online Multiplayer"
 sidebarTitle: "Authority Model"
 description: "How SET: 3D Edition uses Nakama as the authoritative server for all multiplayer Set validation, claim resolution, and state broadcasts to clients."
 ---
@@ -30,7 +30,7 @@ Server authority eliminates all three: the server owns the canonical state, runs
 **One sentence to internalise:** In multiplayer, the client sends **card IDs only**. It never calls `SetValidator` to decide whether those cards form a valid Set.
 </Tip>
 
-The Unity client collects the player's three card selections and fires a `match_claim` message over the Nakama WebSocket. The Nakama match handler runs `SetValidator` on the server, updates match state, and broadcasts the new `MatchState` to all connected clients. The client then receives that state update and applies it via `GameSession.ApplyServerState()`. The UI reacts automatically through the R3 reactive stream.
+The Unity client collects the player's three card selections and passes them to the `OnlineMatchController`, which fires a `match_claim` message over the Nakama WebSocket. The Nakama match handler runs `SetValidator` on the server, updates match state, and broadcasts the new `MatchState` to all connected clients. The `OnlineMatchController` receives that state update, translates it into an `ApplyServerStateCommand`, and the `GameSession` applies it via `GameSession.ApplyServerState()`. The UI reacts automatically through the R3 reactive stream.
 
 There is no shortcut path where the client checks first and sends only valid claims. That would still be a form of cheating enablement — an attacker could intercept the send and replay it with different IDs.
 
@@ -44,35 +44,38 @@ The diagram below shows every component involved in a single multiplayer claim, 
 sequenceDiagram
     participant Player
     participant IH as InputHandler (Client)
-    participant GS as GameSession (Mirror)
-    participant NakamaSDK as NakamaNetworkService
+    participant OMC as OnlineMatchController
+    participant NMS as NakamaMultiplayerService
     participant Server as Nakama Server
     participant MH as Match Handler
+    participant GS as GameSession (Mirror)
 
     Player->>IH: Tap 3rd card
-    IH->>GS: ClaimSelectedCommand(cardIds)
-    GS->>NakamaSDK: IMultiplayerService.SendClaim([12, 37, 58])
-    NakamaSDK->>Server: WebSocket: match_claim { cardIds: [12, 37, 58] }
+    IH->>OMC: ClaimSelectedCommand(cardIds)
+    OMC->>NMS: IMultiplayerService.SendClaim([12, 37, 58])
+    NMS->>Server: WebSocket: match_claim { type, seq, data: { cardIds } }
     Server->>MH: Route to match handler
     MH->>MH: SetValidator.Validate(card12, card37, card58)
     alt Valid Set
         MH->>Server: Broadcast MatchState { board, scores, deckCount }
-        Server-->>NakamaSDK: match_state update (all clients)
-        NakamaSDK-->>GS: ApplyServerState(MatchStateMessage)
+        Server-->>NMS: match_state update (all clients)
+        NMS-->>OMC: IObservable<ServerMessage> emits
+        OMC->>GS: ApplyServerStateCommand → ApplyServerState(MatchStateMessage)
         GS-->>Player: R3 reactive update → score, board, VFX
     else Invalid Set
         MH->>Server: Broadcast MatchState { penalty, unchanged board }
-        Server-->>NakamaSDK: match_state update (all clients)
-        NakamaSDK-->>GS: ApplyServerState(MatchStateMessage)
+        Server-->>NMS: match_state update (all clients)
+        NMS-->>OMC: IObservable<ServerMessage> emits
+        OMC->>GS: ApplyServerStateCommand → ApplyServerState(MatchStateMessage)
         GS-->>Player: R3 reactive update → penalty animation
     end
 ```
 
-The client's `GameSession` is a **mirror** in multiplayer — it holds a copy of the server's state and applies updates atomically. It never computes state independently.
+The `GameSession` is a **mirror** in multiplayer — it holds a copy of the server's state and applies updates atomically. It never computes state independently. Critically, `GameSession` does not hold a reference to `IMultiplayerService` directly; the `OnlineMatchController` acts as the intermediary that bridges the network layer and the game session.
 
 ---
 
-## Why Nakama Over Unity Netcode or Photon?
+## Why Nakama?
 
 The project evaluated several networking options before choosing Nakama. The comparison below captures the reasoning:
 
@@ -84,9 +87,9 @@ The project evaluated several networking options before choosing Nakama. The com
 | Cloud save / player profiles | Not included | Native storage engine (key/value per user) |
 | Friends, parties, and invites | Not included | Built-in friends, groups, and party/lobby primitives |
 | Auth | Not included | Device ID, Google Play Games, Sign in with Apple |
-| Hosting model | Proprietary PaaS; per-MAU pricing at scale | Self-hostable (Docker) **or** Heroic Labs managed cloud |
+| Hosting model | Proprietary PaaS; per-MAU pricing at scale | Self-hostable or Heroic Labs managed cloud |
 
-**The key advantage:** Nakama replaces at least four previously separate infrastructure concerns — matchmaking, leaderboards, cloud save, and auth — with one coherent, self-hostable backend. There is no per-MAU pricing lock-in at scale, and the Heroic Labs managed cloud option reduces DevOps overhead during launch.
+**The key advantage:** Nakama replaces at least four previously separate infrastructure concerns — matchmaking, leaderboards, cloud save, and auth — with one coherent, self-hostable backend. The Heroic Labs managed cloud option reduces DevOps overhead during launch and can be migrated to self-hosted when scale justifies it.
 
 ---
 
@@ -128,7 +131,45 @@ public interface IMultiplayerService
 }
 ```
 
-The concrete `NakamaNetworkService` in the Infrastructure assembly implements `IMultiplayerService` using the Nakama .NET Client SDK. The Application layer depends only on the interface — it can be swapped for a mock during testing without any changes to game logic.
+The concrete `NakamaMultiplayerService` in the Infrastructure assembly implements `IMultiplayerService` using the Nakama .NET Client SDK. The Application layer depends only on the interface — it can be swapped for a mock during testing without any changes to game logic.
+
+---
+
+## The OnlineMatchController Pattern
+
+`GameSession` does not hold a direct reference to `IMultiplayerService`. Instead, the `OnlineMatchController` (Infrastructure assembly) sits between the two:
+
+```csharp
+// Infrastructure assembly
+public class OnlineMatchController
+{
+    private readonly IMultiplayerService _multiplayer;
+    private readonly GameSession _session;
+
+    public OnlineMatchController(IMultiplayerService multiplayer, GameSession session)
+    {
+        _multiplayer = multiplayer;
+        _session = session;
+
+        // Translate every incoming ServerMessage into an IGameCommand for the session
+        _multiplayer.Messages
+            .Subscribe(msg => _session.Handle(new ApplyServerStateCommand(msg)));
+    }
+
+    /// <summary>
+    /// Called by InputHandler when the player selects three cards.
+    /// Sends the raw card IDs to the server — no local validation.
+    /// </summary>
+    public void SendClaim(int[] cardIds)
+        => _multiplayer.SendClaim(cardIds);
+}
+```
+
+**Why this separation matters:**
+
+- `GameSession` remains ignorant of networking. It processes `IGameCommand`s regardless of whether they originate from local input, the AI, or the network.
+- `OnlineMatchController` is the single translation point: `ServerMessage` → `IGameCommand`. If the message schema changes, only `OnlineMatchController` needs updating.
+- The pattern makes `GameSession` trivially unit-testable for the multiplayer path — inject a mock `IMultiplayerService`, emit messages, assert commands.
 
 ---
 
@@ -141,7 +182,8 @@ The `IOnlineGameSession` interface, which `GameSession` implements when in multi
 public interface IOnlineGameSession
 {
     /// <summary>
-    /// Sends a claim intent to the server. Result arrives via ApplyServerState().
+    /// Sends a claim intent to the server via OnlineMatchController.
+    /// Result arrives via ApplyServerState().
     /// There is intentionally no ValidateSet() method on this interface.
     /// </summary>
     void SendClaim(int[] cardIds);
@@ -171,14 +213,25 @@ The absence of `ValidateSet` is not an oversight — it is the architecture's st
 
 ---
 
+## Implementation Checklist
+
+- [ ] `NakamaMultiplayerService` implements `IMultiplayerService` in the Infrastructure assembly — no Nakama SDK types leak into Application or Domain assemblies
+- [ ] `OnlineMatchController` is the sole consumer of `IMultiplayerService.Messages`; it translates each `ServerMessage` into an `ApplyServerStateCommand` for `GameSession`
+- [ ] `GameSession` does NOT hold a direct reference to `IMultiplayerService` — only `OnlineMatchController` does
+- [ ] `IOnlineGameSession` has **no `ValidateSet` method** — only `SendClaim` and `ApplyServerState`
+- [ ] `ApplyServerState()` is the only write path for all multiplayer game state on the client
+
+---
+
 ## Common Mistakes
 
 <Warning>
 **Common Mistakes**
 
 - **Adding `SetValidator` calls to multiplayer client code "for responsiveness."** Even a call that only controls a visual (e.g., playing a pre-emptive valid-set animation) leaks outcome information before the server confirms it, and creates a confusing rollback experience when the server disagrees. Show a "claiming…" state instead.
-- **Importing Nakama SDK types into the Application or Domain assembly.** `NakamaNetworkService` lives in the Infrastructure assembly. If you find yourself writing `using Nakama;` in a GameSession or ViewModel file, you've broken the dependency boundary.
+- **Importing Nakama SDK types into the Application or Domain assembly.** `NakamaMultiplayerService` lives in the Infrastructure assembly. If you find yourself writing `using Nakama;` in a `GameSession` or ViewModel file, you've broken the dependency boundary.
 - **Implementing `ValidateSet` on `IOnlineGameSession`.** The interface omits it on purpose. Adding it bypasses the authority model at the contract level.
+- **Having `GameSession` call `IMultiplayerService.SendClaim` directly.** All network calls from the game session go through `OnlineMatchController`. The session should only receive `IGameCommand`s — it must not know that some of them originate from a network.
 </Warning>
 
 ---
@@ -194,5 +247,8 @@ The absence of `ValidateSet` is not an oversight — it is the architecture's st
   </Card>
   <Card title="Anti-Cheat" href="/multiplayer/anti-cheat">
     Rate limiting, server-side data ownership, and why the client cannot influence outcomes.
+  </Card>
+  <Card title="Architecture Layers" href="/architecture/layers">
+    How the Domain, Application, Infrastructure, and Presentation assemblies enforce dependency boundaries.
   </Card>
 </CardGroup>

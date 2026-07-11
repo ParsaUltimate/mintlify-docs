@@ -1,7 +1,7 @@
 ---
 title: "Dependency Injection with VContainer in SET: 3D Edition"
 sidebarTitle: "VContainer DI"
-description: "How SET: 3D Edition uses VContainer for constructor injection, the composition root pattern, and how to register and resolve dependencies across all layers."
+description: "How SET: 3D Edition uses VContainer constructor injection, the Bootstrap composition root, and Lifetime rules to wire all dependencies across all layers."
 ---
 
 Every system in SET: 3D Edition — `GameSession`, `SetValidator`, `NakamaMultiplayerService`, every ViewModel — declares the things it needs as **constructor parameters**. It never reaches out and grabs them. This is Dependency Injection (DI), and it is the mechanism that makes Clean Architecture actually work at runtime rather than just on paper.
@@ -101,9 +101,11 @@ VContainer reads the constructor signature and resolves each parameter from its 
 
 The composition root is a `LifetimeScope` MonoBehaviour that lives in the `Bootstrap.unity` scene. It is the **only place in the entire codebase** where concrete types are named. Everything outside this file sees only interfaces.
 
+Because `SET.Presentation` cannot reference `SET.Infrastructure` at compile time (see [Assembly Definitions](/architecture/asmdefs)), the Bootstrap `LifetimeScope` lives in a dedicated `SET.Bootstrap` assembly (or a subfolder assembly that explicitly references both `SET.Presentation` and `SET.Infrastructure`). This is the single controlled seam where infrastructure types are permitted to be named.
+
 ```csharp
 // Assets/_Project/Presentation/Bootstrap/GameLifetimeScope.cs
-// (SET.Presentation assembly)
+// (SET.Bootstrap assembly — references both SET.Presentation and SET.Infrastructure)
 
 public class GameLifetimeScope : LifetimeScope
 {
@@ -114,23 +116,24 @@ public class GameLifetimeScope : LifetimeScope
 
         // ── Application ──────────────────────────────────────────
         builder.Register<IAIScanner, AIScanner>(Lifetime.Transient);
-        builder.Register<IMatchOrchestrator, GameSession>(Lifetime.Scoped);
-        // GameSession implements two interfaces — register the second
-        // pointing at the same instance so both resolve the same object
-        builder.RegisterInstance<IGameStateProvider>(
-            /* resolved from container after first registration */);
+        // GameSession implements both IMatchOrchestrator and IGameStateProvider.
+        // Register once and expose under both interfaces using RegisterEntryPoint
+        // or a forwarding registration so both interfaces resolve the same instance.
+        builder.Register<GameSession>(Lifetime.Scoped)
+               .As<IMatchOrchestrator>()
+               .As<IGameStateProvider>();
 
         // ── Infrastructure ────────────────────────────────────────
-        // NOTE: Infrastructure is registered HERE, in Presentation's
-        // Bootstrap. SET.Presentation has no compile-time reference to
-        // SET.Infrastructure — VContainer resolves it via reflection at
-        // startup using the concrete type names listed only in this file.
+        // Infrastructure concrete types are registered here — the ONLY place
+        // in the codebase where SET.Infrastructure types are ever named.
         builder.Register<IMultiplayerService,  NakamaMultiplayerService>(Lifetime.Scoped);
+        builder.Register<ILeaderboardService,  NakamaLeaderboardService>(Lifetime.Singleton);
         builder.Register<ILocalSaveService,    LocalSaveService>(Lifetime.Singleton);
         builder.Register<IAudioService,        AudioService>(Lifetime.Singleton);
 
-        // ── Presentation ViewModels ───────────────────────────────
+        // ── Presentation ViewModels & Services ───────────────────
         builder.Register<MatchViewModel>(Lifetime.Scoped);
+        builder.Register<IViewPresenter, ScreenPresenter>(Lifetime.Scoped);
     }
 }
 ```
@@ -141,14 +144,72 @@ The Bootstrap scene is loaded first and persists for the entire session. Other s
 
 ---
 
+## Registered Service Interfaces
+
+The composition root binds all cross-layer interfaces. The following are the key planned registrations and their signatures:
+
+**`IMultiplayerService`** — bound to `NakamaMultiplayerService`:
+```csharp
+public interface IMultiplayerService
+{
+    Task ConnectAsync(string matchId);
+    void SendClaim(int[] cardIds);
+    IObservable<ServerMessage> Messages { get; }
+    void Disconnect();
+}
+```
+
+**`ILeaderboardService`** — bound to `NakamaLeaderboardService`:
+```csharp
+public interface ILeaderboardService
+{
+    Task<IReadOnlyList<LeaderboardEntry>> GetTopEntries(int count);
+    Task SubmitScore(long score);
+}
+```
+
+**`ILocalSaveService`** — bound to `LocalSaveService`:
+```csharp
+public interface ILocalSaveService
+{
+    Task SaveAsync<T>(string key, T data);
+    Task<T> LoadAsync<T>(string key);
+}
+```
+
+**`IAudioService`** — bound to `AudioService`:
+```csharp
+public interface IAudioService
+{
+    void PlaySfx(string clipId);
+    void PlayMusic(string trackId);
+    void SetMusicVolume(float volume);
+    void SetSfxVolume(float volume);
+}
+```
+
+**`IViewPresenter`** — bound to `ScreenPresenter` in Presentation:
+```csharp
+public interface IViewPresenter
+{
+    void ShowBoard();
+    void UpdateHud(GameStateSnapshot snapshot);
+    void PlaySetAnimation(bool wasValid, int[] cardIds);
+    void ShowMatchResult(MatchResultData result);
+    void ShowToast(string message);
+}
+```
+
+---
+
 ## Lifetime Rules
 
 Choosing the wrong lifetime is a common source of subtle bugs. Use this table as a guide:
 
 | Lifetime | Meaning | Examples in SET: 3D Edition |
 |---|---|---|
-| `Singleton` | One instance for the entire application session | `SetValidator`, `AudioService`, `LocalSaveService` |
-| `Scoped` | One instance per container scope (e.g., per match) | `GameSession`, `NakamaMultiplayerService`, `MatchViewModel` |
+| `Singleton` | One instance for the entire application session | `SetValidator`, `AudioService`, `LocalSaveService`, `NakamaLeaderboardService` |
+| `Scoped` | One instance per container scope (e.g., per match) | `GameSession`, `NakamaMultiplayerService`, `MatchViewModel`, `ScreenPresenter` |
 | `Transient` | A brand-new instance every time the type is resolved | `AIScanner` (independent state per creation) |
 
 **Rules of thumb:**
@@ -253,6 +314,22 @@ No `LifetimeScope`, no `GameObject`, no Play Mode required. Because Domain and A
 
 ---
 
+## Implementation Checklist
+
+Use this checklist when adding a new service or registering a new type with VContainer:
+
+- [ ] New service interface declared in `SET.Application` (never in `SET.Infrastructure` or `SET.Presentation`)
+- [ ] Concrete implementation placed in the correct layer (`SET.Infrastructure` for external adapters, `SET.Presentation` for Unity-dependent presenters)
+- [ ] Binding added to `GameLifetimeScope.Configure()` — the **only** file where concrete types are named
+- [ ] Correct `Lifetime` chosen: `Singleton` for stateless, `Scoped` for per-match state, `Transient` for independent-state objects
+- [ ] No captive dependencies (no `Transient` injected into `Singleton`)
+- [ ] MonoBehaviour views use `[Inject]` method named `Construct`, not constructor injection
+- [ ] Injected fields accessed only in `Start` (or later), never in `Awake`
+- [ ] Unit tests construct classes directly without the DI container
+- [ ] No `FindObjectOfType`, `GetComponent` across objects, or `static Instance` anywhere in the codebase
+
+---
+
 ## Banned Patterns and Their Replacements
 
 | Banned | Why | Replacement |
@@ -273,7 +350,7 @@ No `LifetimeScope`, no `GameObject`, no Play Mode required. Because Domain and A
 
 **Calling injected fields in `Awake`.** VContainer runs injection after Unity calls `Awake` but before `Start`. Access injected dependencies only in `Start` or later, or in the `Construct` method itself.
 
-**Registering both an interface and its implementation separately with different lifetimes.** For example, registering `GameSession` as `Transient` and `IMatchOrchestrator` as `Singleton` pointing to `GameSession` will create two separate instances. Use `RegisterEntryPoint` or ensure a single registration covers all interfaces the type implements.
+**Registering both an interface and its implementation separately with different lifetimes.** For example, registering `GameSession` as `Transient` and `IMatchOrchestrator` as `Singleton` pointing to `GameSession` will create two separate instances. Use `.As<>()` chaining on a single registration to ensure all interfaces resolve the same object.
 
 ---
 

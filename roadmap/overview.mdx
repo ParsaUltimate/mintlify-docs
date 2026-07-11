@@ -31,6 +31,28 @@ The project is divided into 13 sequential-and-parallel phases spanning roughly *
 | 13 | Launch Preparation | 1 week | Planned |
 | **Total** | | **~22–26 weeks** | — |
 
+The diagram below shows how phases are sequenced and where parallel tracks diverge. Phases without hard dependencies on one another can be worked concurrently — most notably the Nakama backend (Phase 6) alongside the client Application and game-mode work (Phases 3–5), and the UI Framework (Phase 8) alongside multiplayer backend work.
+
+```mermaid
+graph LR
+    P1["Phase 1\nSetup & Foundation\n2 wks"] --> P2
+    P2["Phase 2\nCore Domain\n3 wks"] --> P3
+    P2 --> P6
+    P3["Phase 3\nApp Layer & FSM\n2 wks"] --> P4
+    P3 --> P5
+    P3 --> P8
+    P4["Phase 4\nSingle Player + AI\n3 wks"] --> P5
+    P5["Phase 5\nPass & Play\n1 wk"] --> P12
+    P6["Phase 6\nNakama Backend\n4 wks"] --> P7
+    P7["Phase 7\nMultiplayer Client\n3 wks"] --> P12
+    P8["Phase 8\nUI Framework\n4 wks"] --> P9
+    P9["Phase 9\nBoard HUD\n3 wks"] --> P10
+    P10["Phase 10\nStore & Settings\n1 wk"] --> P11
+    P11["Phase 11\nTutorial\n1 wk"] --> P12
+    P12["Phase 12\nTesting & Polish\n4 wks"] --> P13
+    P13["Phase 13\nLaunch Prep\n1 wk"]
+```
+
 ---
 
 ## Critical Path
@@ -75,7 +97,7 @@ Identify these risks early and apply the mitigations proactively — do not wait
 | Nakama learning curve | Multiplayer delay | Run a Nakama spike in week 1 of Phase 6; evaluate Heroic Cloud for managed hosting to reduce ops burden |
 | 21 cards at 60 fps on mid-range Android | Low FPS / dropped frames | Target a Snapdragon 665 device from Phase 9 onward; profile draw calls, use simple geometry and LODs |
 | Multiplayer race conditions | Unfair or disputed outcomes | Deterministic 20 Hz server tick loop; server-side tests for simultaneous claim resolution |
-| Scope creep | Schedule overrun beyond 6 months | Strictly enforce the [Hard Boundaries](/standards/conventions); all new requests need a formal change request before any implementation begins |
+| Scope creep | Schedule overrun beyond 6 months | Strictly enforce the project scope documented in the [Roadmap Overview](/roadmap/overview); all new requests need a formal change request before any implementation begins |
 | Third-party SDK breaking changes (Nakama, R3) | Compilation failures mid-sprint | Pin package versions; test upgrades on a branch before merging to main |
 
 ---

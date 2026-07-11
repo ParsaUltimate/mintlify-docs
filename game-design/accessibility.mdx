@@ -1,13 +1,13 @@
 ---
-title: "Accessibility Features and Inclusive Design Goals"
+title: "Accessibility Features and Inclusive Design in SET: 3D"
 sidebarTitle: "Accessibility"
-description: "Planned accessibility features for SET: 3D Edition — colorblind mode, shape assist, adjustable card sizes, text-to-speech, haptics, and responsive device layout."
+description: "Planned accessibility features for SET: 3D Edition — colorblind mode, shape assist, adjustable card sizes, text-to-speech, and responsive device layout."
 ---
 
 Color is one of the four core attributes in the SET card game. Without accessibility support, a player with red-green colorblindness cannot reliably distinguish Red, Green, and Purple cards — meaning roughly 8 % of male players and 0.5 % of female players are effectively locked out of the game by default. Addressing this is not optional polish; it is a **v1.0 requirement** that appears explicitly in the Hard Boundaries document. This page documents all planned accessibility features, the device responsiveness rules from the UI spec, and the layer-level guidance for where these features are implemented.
 
 <Warning>
-**Pre-production — all features on this page are Planned.** Accessibility features are in-scope for v1.0 and must ship at launch. They have not yet been implemented. See the [Hard Boundaries](/onboarding/prerequisites) document for the full in-scope list.
+**Pre-production — all features on this page are Planned.** Accessibility features are in-scope for v1.0 and must ship at launch. They have not yet been implemented.
 </Warning>
 
 ## Why this page exists
@@ -30,7 +30,6 @@ All four features below are **in-scope for v1.0** per the Hard Boundaries docume
 | **Shape Assist** | Overlays a label or icon on each card that reinforces the shape type (Diamond, Squiggle, Oval) with additional visual cues — useful for players who find the 3D shapes ambiguous at small sizes. | Settings → Accessibility → Shape Assist (On/Off) |
 | **Adjustable Card Size** | Three preset sizes — Small (S), Medium (M), and Large (L) — scale the 3D card prefabs and grid layout. Useful for low-vision players and for tablets vs phones. | Settings → Accessibility → Card Size (S / M / L) |
 | **Text-to-Speech** | When enabled, tapping a card reads its attributes aloud: *"Two red striped diamonds."* Reads Number, Color, Shading, then Shape. Uses the Android TalkBack-compatible speech synthesis API. Toggle also silences callouts for players who find them distracting. | Settings → Accessibility → Text-to-Speech (On/Off) |
-| **High-Contrast UI** | Increases contrast on all non-card UI elements (HUD text, buttons, overlays). Specified in the Settings screen UI layout. | Settings → Accessibility → High-Contrast UI (On/Off) |
 
 <Note>
 Colorblind Mode must remain effective with **any equipped cosmetic symbol pack**. The cosmetic store is explicitly prohibited from shipping symbol sets that undermine accessibility. This is enforced as a content policy, not a code gate.
@@ -137,10 +136,10 @@ The following accessibility-adjacent features are **explicitly deferred** to a p
   <Card title="Game Modes" icon="gamepad" href="/game-design/modes">
     How accessibility settings (card size, colorblind mode) apply across all three modes.
   </Card>
-  <Card title="UI Flow" icon="layout" href="/architecture/reactive-ui">
+  <Card title="Reactive UI" icon="layout" href="/architecture/reactive-ui">
     Device responsiveness tables, Settings screen component spec, and the full screen-by-screen UI breakdown.
   </Card>
-  <Card title="Game Modes" icon="shield" href="/game-design/modes">
+  <Card title="Game Concept" icon="book" href="/game-design/concept">
     The complete in-scope and out-of-scope lists that define exactly what must ship for v1.0.
   </Card>
 </CardGroup>

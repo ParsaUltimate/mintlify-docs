@@ -1,10 +1,14 @@
 ---
 title: "Complete SET Rules: Deck, Validation, and Board Logic"
 sidebarTitle: "Rules"
-description: "Full implementation-ready SET card game rules covering the validation algorithm, board layout, dealing, scoring, end conditions, and every documented edge case."
+description: "Implementation-ready SET card game rules — validation algorithm, board layout, dealing, scoring, end conditions, and every documented edge case."
 ---
 
 Every mode in SET: 3D Edition — Single Player, Online Multiplayer, Pass & Play — runs its rules through the same `SetValidator` domain service and the same `GameSession` state machine. There is no separate "multiplayer rules" or "AI rules." This page is the **single authoritative source** for all gameplay logic that engineers, QA testers, and the Nakama server-side Match Handler must implement identically. Any ambiguity found here should be raised and resolved before writing code, not after.
+
+<Warning>
+**Pre-production.** SET: 3D Edition is currently in pre-production. The rules on this page are fully specified, but none of the described systems have been implemented yet. All validator logic, board behaviour, and state machine transitions are **planned**.
+</Warning>
 
 ## Why one authoritative rules document matters
 
@@ -113,7 +117,7 @@ flowchart TD
 
 ### Initial deal
 
-At match start, 12 cards are drawn from the top of the shuffled deck and placed face-up in a **4 × 3 grid** (4 columns, 3 rows). Slot indices are assigned left-to-right, top-to-bottom: slot 0 is top-left, slot 11 is bottom-right.
+At match start, 12 cards are drawn from the top of the shuffled deck and placed face-up in a **4 × 3 grid** (4 columns, 3 rows). Slot indices are assigned left-to-right, top-to-bottom: slot 0 is top-left, slot 11 is bottom-right. The grid always keeps **4 columns**; expansion adds rows.
 
 ```
 Slot layout (4 columns × 3 rows):
@@ -132,13 +136,13 @@ Immediately after a valid Set is claimed and its three cards are removed, the em
 
 ### Expansion (no Set exists)
 
-After every board mutation (initial deal, refill, or expansion), the system calls `AnySetExists()`. If no valid Set exists **and** the Deck has ≥ 3 cards remaining, a "No Set" notification is displayed briefly and 3 new cards are added:
+After every board mutation (initial deal, refill, or expansion), the system calls `AnySetExists()`. If no valid Set exists **and** the Deck has ≥ 3 cards remaining, a "No Set" notification is displayed briefly and 3 new cards are added. The grid always retains 4 columns; expansion appends additional rows:
 
-| Board size before | After expansion |
-|---|---|
-| 12 cards (4 × 3) | 15 cards (4 × 4, minus one row gap) |
-| 15 cards | 18 cards |
-| 18 cards | 21 cards (maximum) |
+| Board size before | After expansion | Grid layout |
+|---|---|---|
+| 12 cards | 15 cards | 4 columns × 3 full rows + 3 slots in a 4th row |
+| 15 cards | 18 cards | 4 columns × 4 full rows + 2 slots in a 5th row |
+| 18 cards | 21 cards (maximum) | 4 columns × 5 full rows + 1 slot in a 6th row |
 
 **Maximum board size is 21 cards.** Once the board reaches 21 and no Set exists, the game ends immediately — even if the Deck still contains cards. Official SET rules state that no more cards can be added beyond 21.
 
@@ -216,9 +220,9 @@ Penalties are applied immediately. In online multiplayer, the Nakama server broa
 The match ends when **any one** of these conditions is true:
 
 1. The Deck is empty **and** no valid Set exists on the Board.
-2. The Board is at 21 cards, no valid Set exists, and the Deck is empty.
+2. The Board is at 21 cards and no valid Set exists (regardless of Deck size — no further cards can be added per official SET rules).
 3. *(Timed mode)* The global match timer reaches 0.
-4. *(Timed mode + Point penalty)* A time penalty reduces a player's clock to ≤ 0.
+4. *(Timed mode + Time penalty)* A time penalty reduces a player's clock to ≤ 0.
 
 ### Determining the winner
 

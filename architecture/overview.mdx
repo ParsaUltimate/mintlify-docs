@@ -10,6 +10,18 @@ SET: 3D Edition is built on Clean Architecture — a layered design where the ga
   **Pre-production** — SET: 3D Edition is currently in pre-production. The architecture described here is the intended design. Individual systems are stubs or not yet implemented. Features marked **Planned** have not been built.
 </Warning>
 
+## Key responsibilities
+
+This page owns three outcomes for every engineer reading it:
+
+| Responsibility | Detail |
+|---------------|--------|
+| **Mental model** | Establish the four-layer Clean Architecture model and the single dependency rule before any other reading |
+| **Mode differentiation** | Explain how the same codebase serves Single Player, Pass & Play, and Online Multiplayer (**Planned**) by swapping DI bindings, not logic |
+| **Non-negotiable rules** | Document the hard boundaries that every layer must respect, backed by compile-time enforcement |
+
+---
+
 ## Why this architecture
 
 Three game modes (Single Player, Online Multiplayer, Pass & Play) sharing one codebase creates a real engineering problem: if game logic is entangled with Unity MonoBehaviours, the multiplayer client can't share that logic with the Nakama server. If UI code reaches directly into networking classes, you can't unit-test score calculation without spinning up a Nakama instance.
@@ -135,7 +147,7 @@ ViewModels in Presentation subscribe to `StateStream` and `EventStream`. `TouchI
 
 ## Non-negotiable rules
 
-These rules come from the Hard Boundaries document and are enforced by asmdef compile-time checks and CI validators:
+These rules come from the Hard Boundaries document and are enforced by `.asmdef` compile-time checks and editor validators:
 
 <AccordionGroup>
   <Accordion title="Domain and Application never reference UnityEngine or Nakama">
@@ -154,6 +166,20 @@ These rules come from the Hard Boundaries document and are enforced by asmdef co
     No `FindObjectOfType`, no `GetComponent<T>()` for services, no static singletons. Every dependency is declared in a constructor parameter and wired by VContainer's `LifetimeScope` in the Bootstrap scene.
   </Accordion>
 </AccordionGroup>
+
+---
+
+## Implementation checklist
+
+Use this checklist when adding a new cross-layer feature to ensure the architecture is respected:
+
+- [ ] **Domain type added?** Zero external references — no `UnityEngine`, `Nakama`, or `R3` imports
+- [ ] **New Application interface defined?** Lives in `Application/Services/` — Infrastructure implements it, Presentation consumes it via DI
+- [ ] **New mode or flow added?** State authority model documented — client-owned (local) or server-mirror (online multiplayer, Planned)
+- [ ] **No `GameSession` expansion into Infrastructure concerns** — audio, platform, and network belong in their own Infrastructure services
+- [ ] **All reactive streams unidirectional** — Application pushes state out; Presentation pushes commands in; no bidirectional callbacks
+- [ ] **New DI binding registered in Bootstrap** — no `new ConcreteType()` calls outside the composition root
+- [ ] **Unit tests added** for any new Domain or Application logic in `_Tests/EditMode/`
 
 ---
 

@@ -1,5 +1,5 @@
 ---
-title: "Testing Standards: Unit Tests, Integration, and Coverage Goals"
+title: "Testing Standards: Coverage, Structure, and CI Rules"
 sidebarTitle: "Testing"
 description: "Testing standards for SET: 3D Edition covering unit tests with NSubstitute, PlayMode integration tests, naming conventions, and coverage targets."
 ---
@@ -9,6 +9,25 @@ SET has one property that makes testing unusually important: the rules are perfe
 <Warning>
   All unit tests must pass in CI before a PR can merge. A single failing test blocks the entire team. Never push a test in a commented-out or `[Ignore]`-attributed state without a linked ticket and a deadline for re-enabling it.
 </Warning>
+
+The diagram below shows the testing strategy across layers, the tools used at each level, and the coverage targets. EditMode tests are fast and run on every push; PlayMode tests are reserved for integration concerns that genuinely require a running Unity scene.
+
+```mermaid
+flowchart BT
+    subgraph EditMode["EditMode Tests — SET.Tests.EditMode\nNUnit + NSubstitute · Target: 100% branch coverage"]
+        D["Domain\nSetValidator · Deck · Board · Player\nGameRules · CardAttributes"]
+        A["Application\nGameSession FSM · Command Handling\nPenalty Logic · AI Behaviour"]
+    end
+    subgraph PlayMode["PlayMode Tests — SET.Tests.PlayMode\nUnity Test Framework · Happy-path integration"]
+        P["Presentation\nViewModel ↔ View bindings\nInput routing · Full match loop"]
+    end
+    subgraph Infra["Infrastructure\nAdapter smoke tests — happy path only"]
+        I["NakamaMultiplayerService\nLocalSaveService"]
+    end
+    D --> A
+    A --> P
+    P --> I
+```
 
 ---
 

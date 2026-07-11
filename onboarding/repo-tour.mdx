@@ -12,6 +12,18 @@ Codebase disorientation is one of the most common sources of architecture violat
 
 ---
 
+## Key responsibilities
+
+This page owns three navigation outcomes for every contributor:
+
+| Responsibility | Detail |
+|---------------|--------|
+| **Folder orientation** | Map every `Assets/_Project/` subfolder to its Clean Architecture layer |
+| **Assembly literacy** | Explain which `.asmdef` references which, so contributors understand what will and won't compile together |
+| **Quick-find reference** | Give a reliable answer to "where does X live?" for every major type and asset category |
+
+---
+
 ## Top-level folder structure
 
 Everything production-relevant lives under `Assets/_Project/`. Third-party libraries, tests, and editor tools each have their own top-level sibling folders to keep them cleanly separated from game code.
@@ -169,6 +181,20 @@ These files are loaded at runtime via `Resources.Load` or Addressables; parsing 
 > **Dependencies always point inward.** Outer layers know about inner layers. Inner layers know nothing about outer layers.
 
 If you're in the Domain layer and you're about to add `using SET.Application;` — stop. That reference goes the wrong direction. If you're in Presentation and you're about to add `using SET.Infrastructure;` — stop. Use the interface from Application instead, and let VContainer supply the implementation.
+
+---
+
+## Implementation checklist
+
+Use this checklist when adding a new file to confirm it belongs in the right place:
+
+- [ ] **New domain type?** File goes in `Assets/_Project/Domain/` (entity, value object, enum, or interface) with no external references
+- [ ] **New application interface?** File goes in `Assets/_Project/Application/Services/` — Infrastructure implements it, Presentation consumes it
+- [ ] **New Infrastructure class?** File goes in `Assets/_Project/Infrastructure/<Subsystem>/` — implement the Application interface, register in Bootstrap
+- [ ] **New MonoBehaviour view?** File goes in `Assets/_Project/Presentation/Views/` with a paired ViewModel in `Presentation/ViewModels/`
+- [ ] **New scene?** File goes in `Assets/_Project/Scenes/` — never inside a layer subfolder
+- [ ] **New test?** EditMode tests for Domain/Application in `Assets/_Tests/EditMode/`; PlayMode integration tests in `Assets/_Tests/PlayMode/`
+- [ ] **New config?** JSON config files go in `Assets/_Project/Data/`; parsed by Infrastructure serialization code
 
 ---
 

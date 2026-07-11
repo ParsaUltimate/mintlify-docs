@@ -1,5 +1,5 @@
 ---
-title: "Approved Patterns and Banned Anti-Patterns in SET: 3D Edition"
+title: "Approved Patterns and Anti-Patterns: SET: 3D Edition"
 sidebarTitle: "Patterns"
 description: "Approved design patterns with usage rules, code examples, and banned anti-patterns with required replacements for the SET: 3D Edition codebase."
 ---
@@ -9,6 +9,39 @@ Every non-trivial architecture decision has been made once, documented here, and
 <Warning>
   Any **banned pattern** introduced into the codebase must be explicitly justified in the PR description and approved by the technical lead. There are no quick exceptions, no "just this once."
 </Warning>
+
+The diagram below shows how the adopted patterns interact at runtime. Dependencies flow inward — outer layers depend on inner layers via interfaces, never the reverse.
+
+```mermaid
+flowchart TD
+    subgraph Presentation["Presentation Layer"]
+        VM["ViewModels\n(R3 Observer)"]
+        MB["MonoBehaviours\n(Thin Views)"]
+        TI["TouchInputHandler"]
+    end
+    subgraph Application["Application Layer"]
+        GS["GameSession\n(FSM + CQS)"]
+        CMD["IGameCommand\n(Commands)"]
+        SNAP["GameStateSnapshot\n(Queries)"]
+    end
+    subgraph Infrastructure["Infrastructure Layer"]
+        NMS["NakamaMultiplayerService\n(Adapter)"]
+        LSS["LocalSaveService\n(Adapter)"]
+    end
+    subgraph Domain["Domain Layer"]
+        SV["SetValidator\n(Singleton via DI)"]
+        AI["AIScanner\n(Strategy)"]
+        Deck["Deck\n(Factory)"]
+    end
+    TI -- "IGameCommand" --> GS
+    GS -- "IObservable&lt;GameStateSnapshot&gt;" --> VM
+    VM --> MB
+    GS --> SV
+    GS --> AI
+    GS --> Deck
+    NMS -- "IMultiplayerService" --> GS
+    LSS -- "ILocalSaveService" --> GS
+```
 
 ---
 
