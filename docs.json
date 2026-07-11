@@ -1,72 +1,113 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mintlify Starter Kit",
+  "name": "SET: 3D Edition",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#7C3AED",
+    "light": "#A78BFA",
+    "dark": "#3B0764"
   },
   "favicon": "/favicon.svg",
   "navigation": {
-    "pages": [
+    "tabs": [
       {
-        "group": "Getting Started",
-        "pages": [
-          "index",
-          "quickstart"
+        "tab": "Game & Design",
+        "groups": [
+          {
+            "group": "Welcome",
+            "pages": [
+              "welcome/introduction",
+              "welcome/glossary"
+            ]
+          },
+          {
+            "group": "Game Design",
+            "pages": [
+              "game-design/concept",
+              "game-design/rules",
+              "game-design/modes",
+              "game-design/accessibility"
+            ]
+          },
+          {
+            "group": "Developer Onboarding",
+            "pages": [
+              "onboarding/prerequisites",
+              "onboarding/repo-tour",
+              "onboarding/first-tasks"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Architecture",
+        "groups": [
+          {
+            "group": "System Design",
+            "pages": [
+              "architecture/overview",
+              "architecture/layers",
+              "architecture/asmdefs",
+              "architecture/di-vcontainer",
+              "architecture/reactive-ui"
+            ]
+          },
+          {
+            "group": "Core Gameplay",
+            "pages": [
+              "core-gameplay/card-model",
+              "core-gameplay/set-validation",
+              "core-gameplay/board-and-dealing",
+              "core-gameplay/session-lifecycle",
+              "core-gameplay/ai-opponents"
+            ]
+          },
+          {
+            "group": "Multiplayer",
+            "pages": [
+              "multiplayer/authority-model",
+              "multiplayer/match-lifecycle",
+              "multiplayer/sync-and-reconnect",
+              "multiplayer/anti-cheat"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Roadmap & Standards",
+        "groups": [
+          {
+            "group": "Implementation Roadmap",
+            "pages": [
+              "roadmap/overview",
+              "roadmap/phases"
+            ]
+          },
+          {
+            "group": "Engineering Standards",
+            "pages": [
+              "standards/conventions",
+              "standards/patterns",
+              "standards/testing",
+              "standards/pr-checklist"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/glossary",
+              "reference/data-formats",
+              "reference/faq"
+            ]
+          }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://app.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-      "copy",
-      "view",
-      "chatgpt",
-      "claude",
-      "perplexity",
-      "mcp",
-      "cursor",
-      "vscode"
     ]
   },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/ParsaUltimate/Set-3D-Game"
     }
   }
 }

@@ -1,0 +1,423 @@
+---
+title: "Phase-by-Phase Breakdown: Goals, Deliverables, and DoD"
+sidebarTitle: "Phases"
+description: "Detailed breakdown of all 13 development phases for SET: 3D Edition with goals, key tasks, dependencies, and Definition of Done per phase."
+---
+
+This page is the day-to-day reference for what to build and when it is done. Each phase has a stated goal, the concrete tasks required to meet it, its upstream dependencies, and a Definition of Done (DoD) — the measurable criteria that must be true before the team moves on. If a DoD item is not met, the phase is not complete, regardless of calendar time.
+
+<Info>
+  Durations are **engineering weeks** (40 hours/week). They assume moderate-to-high proficiency in Unity, C#, and — from Phase 6 onward — Nakama. Your actual velocity may differ; adjust sprint plans accordingly but never skip a DoD item.
+</Info>
+
+---
+
+## Phases
+
+<AccordionGroup>
+
+<Accordion title="Phase 1 — Project Setup & Foundation · 2 weeks">
+
+### Goal
+
+Produce a bootable Unity project with the full Clean Architecture folder structure, all assembly definitions, a wired VContainer DI container, a passing CI pipeline, and placeholder scenes. Nothing gameplay yet — just a solid foundation that every subsequent phase builds on.
+
+### Key Tasks
+
+| Task | Description | Est. |
+|------|-------------|------|
+| 1.1 | Create Unity project (2022 LTS), set Android as the build target, import core packages (R3, VContainer, Nakama client, UniTask, NSubstitute) | 1 day |
+| 1.2 | Set up the folder structure and seven `.asmdef` files (`SET.Domain`, `SET.Application`, `SET.Infrastructure`, `SET.Presentation`, `SET.Editor`, `SET.Tests.EditMode`, `SET.Tests.PlayMode`) per the Project Structure doc | 1 day |
+| 1.3 | Configure VContainer and a Bootstrap scene that wires the DI container on startup | 2 days |
+| 1.4 | Integrate `.editorconfig`, Roslyn analyzers, and CI (GitHub Actions or Unity Cloud Build) — format check, analyzer violations as errors, unit test run | 2 days |
+| 1.5 | Implement `ILocalSaveService` (JSON file save/load) and basic settings persistence | 1 day |
+| 1.6 | Write Editor validation scripts that fail the build if asmdef dependency rules are violated | 1 day |
+| 1.7 | Create placeholder Splash and Main Menu scenes so the project is launchable | 1 day |
+
+### Dependencies
+
+None — Phase 1 is the starting point.
+
+### Definition of Done
+
+- [ ] All 7 assembly definitions compile with zero errors
+- [ ] VContainer DI container resolves at least one binding in the Bootstrap scene
+- [ ] Placeholder scenes load on Android without crashing
+- [ ] CI pipeline runs and is green (format check + analyzer + empty test suite)
+- [ ] `ILocalSaveService` round-trips a settings object to disk and back
+
+</Accordion>
+
+<Accordion title="Phase 2 — Core Domain & Gameplay · 3 weeks">
+
+### Goal
+
+Implement every domain entity, value object, and service that makes SET playable as logic: `Card`, `Deck`, `Board`, `SetValidator`, `Player`, and `GameRules`. This layer must be pure C# — no Unity, no Nakama — and must be exhaustively unit-tested. It is the shared truth used by the client, the AI, and (as a ported reference) the Nakama server.
+
+### Key Tasks
+
+| Task | Description | Est. |
+|------|-------------|------|
+| 2.1 | Implement `Card`, `CardAttributes`, `CardId`, and all four attribute enums (`Number`, `Shape`, `Color`, `Shading`) | 1 day |
+| 2.2 | Implement `Deck` — seeded shuffle, draw-without-replacement — with unit tests | 2 days |
+| 2.3 | Implement `Board` and `CardSlot` — card placement, removal, and 3-card expansion | 2 days |
+| 2.4 | Implement `SetValidator` (`Validate`, `FindAllSets`, `AnySetExists`) — must be pure, deterministic, and allocation-conscious in hot paths | 3 days |
+| 2.5 | Implement `Player` entity with score accumulation and penalty tracking | 0.5 days |
+| 2.6 | Define `GameRules` value object (board size config, penalty mode, timed flag) and `MatchState` enum | 0.5 days |
+| 2.7 | Write exhaustive unit tests for all of the above — valid Sets, invalid Sets (one attribute violates the rule), board expansion triggers, no-Set-exists scenarios | 3 days |
+
+### Dependencies
+
+Phase 1 complete (compilable project, asmdef structure in place).
+
+### Definition of Done
+
+- [ ] `SET.Domain` assembly has **zero** `using UnityEngine;` statements
+- [ ] `SetValidator.Validate` returns correct results for every valid and invalid combination of the 81-card deck
+- [ ] `Deck` shuffle is reproducible given the same seed
+- [ ] `Board.AnySetExists()` correctly returns `false` on a board with no valid Set
+- [ ] All unit tests pass in CI
+
+</Accordion>
+
+<Accordion title="Phase 3 — Application Layer & State Machine · 2 weeks">
+
+### Goal
+
+Build the `GameSession` orchestrator that drives a match from start to end-game using a finite state machine. Wire in command handling, reactive state streams, and penalty logic. After this phase a complete game loop — no UI, no network — can be driven by feeding commands into `GameSession` and reading back `GameStateSnapshot` objects.
+
+### Key Tasks
+
+| Task | Description | Est. |
+|------|-------------|------|
+| 3.1 | Define `IGameCommand` and all command types (`SelectCardCommand`, `ClaimSelectedCommand`, `RequestHintCommand`, etc.) plus `IGameStateProvider` and `IMatchOrchestrator` interfaces | 1 day |
+| 3.2 | Implement the `GameSession` state machine: `BoardIdle → CardSelected1 → CardSelected2 → Validating → (Valid/Invalid) → Refilling → BoardIdle → … → MatchEnd` | 5 days |
+| 3.3 | Integrate `SetValidator` as an injected dependency; implement all three `PenaltyMode` types (`None`, `Time`, `Point`) | 1 day |
+| 3.4 | Implement `GameStateSnapshot` (immutable DTO) production and `IObservable<MatchEvent>` streaming via R3 `Subject<T>` | 1 day |
+| 3.5 | Unit-test the full state machine: feed command sequences, assert state transitions, verify `MatchEvent` emissions and penalty application | 2 days |
+
+### Dependencies
+
+Phase 2 complete.
+
+### Definition of Done
+
+- [ ] `SET.Application` has zero `using UnityEngine;` or `using Nakama;` statements
+- [ ] All valid state transitions covered by unit tests; all invalid commands silently discarded in the wrong state
+- [ ] `GameStateSnapshot` is an immutable record — no mutable properties
+- [ ] A console-driven test can play a full match (deal → select → claim → refill → … → end-game) without UI
+
+</Accordion>
+
+<Accordion title="Phase 4 — Single Player + AI · 3 weeks">
+
+### Goal
+
+Implement all four AI difficulty tiers (Easy, Medium, Hard, Expert) via `AIScanner`, plus Practice Mode, Campaign Mode, and Daily Challenge. After this phase the game is fully playable in single-player without any UI beyond a thin test harness.
+
+### Key Tasks
+
+| Task | Description | Est. |
+|------|-------------|------|
+| 4.1 | Implement `AIScanner` using `SetValidator.FindAllSets`, configurable reaction delay, and per-difficulty miss rate | 3 days |
+| 4.2 | Integrate `AIScanner` into `GameSession` Single Player mode — AI claims via timer, cancels on board change | 2 days |
+| 4.3 | Implement `HintService` — highlights one card from any valid Set; counts hint usage | 1 day |
+| 4.4 | Build `CampaignManager` — linear progression through AI difficulty stages, tracking unlockables | 2 days |
+| 4.5 | Implement `DailyChallenge` — deterministic seed generation so every player gets the same board on the same calendar day | 1 day |
+| 4.6 | Implement `PracticeMode` — no AI, unlimited hints, no scoring pressure | 1 day |
+| 4.7 | Unit-test AI timing and miss rates using fixed seeds; test board-change cancellation | 2 days |
+
+### Dependencies
+
+Phase 3 complete.
+
+### Definition of Done
+
+- [ ] AI claims Sets within the configured reaction window ± 10% on a fixed seed (verified by unit test)
+- [ ] AI miss rate matches configured value ± 5% over 1 000 simulated rounds
+- [ ] `DailyChallenge` produces identical board state on two different `GameSession` instances given the same date seed
+- [ ] All three single-player modes (`Practice`, `Campaign`, `DailyChallenge`) reach end-game without error
+
+</Accordion>
+
+<Accordion title="Phase 5 — Pass & Play · 1 week">
+
+### Goal
+
+Extend `GameSession` to support 2–8 human local players on a single device. Implement both claim input modes — colour-coded Tap Zones and sequential Turn Assist.
+
+### Key Tasks
+
+| Task | Description | Est. |
+|------|-------------|------|
+| 5.1 | Extend `GameSession` to hold an array of `PlayerType.Human` local players and resolve simultaneous claims by arrival order | 1 day |
+| 5.2 | Implement `TapZoneInputHandler` — maps screen zone touches to the corresponding player's `ClaimSelectedCommand` | 1 day |
+| 5.3 | Add Turn Assist mode — sequential turns with a current-player indicator; no simultaneous claiming | 1 day |
+| 5.4 | Unit-test multi-player local flow, simultaneous tap debouncing, and correct score attribution | 1 day |
+
+### Dependencies
+
+Phase 3 complete.
+
+### Definition of Done
+
+- [ ] Pass & Play session with 4 players reaches end-game with correct per-player scores
+- [ ] Simultaneous tap from two zones within the same frame attributes the claim to the first arrival only
+- [ ] Turn Assist correctly blocks input from all players except the active one
+
+</Accordion>
+
+<Accordion title="Phase 6 — Nakama Backend · 4 weeks">
+
+### Goal
+
+Stand up a fully operational Nakama server with an authoritative match handler that mirrors the domain logic, a 20 Hz tick loop, matchmaking (Ranked, Quick Match, Private Room, Tournament), leaderboards, and cloud save. This phase is **the longest external dependency** in the project — start it early and run it concurrently with Phases 4–5.
+
+### Key Tasks
+
+| Task | Description | Est. |
+|------|-------------|------|
+| 6.1 | Set up Nakama instance (Docker locally or Heroic Cloud), configure authentication, storage namespaces, and matchmaker parameters | 2 days |
+| 6.2 | Write the authoritative server-side match handler (TypeScript or Lua) porting the domain logic: deck shuffle, board management, `SetValidator` equivalent, claim resolution, state broadcast | 8 days |
+| 6.3 | Implement the 20 Hz authoritative tick loop — process queued inputs, broadcast `GameStateSnapshot` delta to all clients | 3 days |
+| 6.4 | Implement matchmaking: Quick Match (ping-preference), Ranked (Elo MMR), Private Room (shareable code), Tournament (server-scheduled brackets) | 3 days |
+| 6.5 | Set up leaderboards for Daily Challenge scores and Ranked MMR | 1 day |
+| 6.6 | Cloud save for player stats, cosmetics ownership, and campaign progress | 1 day |
+| 6.7 | Server-side tests: match handler correctness, simultaneous claim tie-breaking, reconnect/resume logic | 3 days |
+
+### Dependencies
+
+Phase 1 (project infrastructure), Phase 2 (domain logic used as authoritative reference for the server port).
+
+### Definition of Done
+
+- [ ] Bot clients can play a full match end-to-end against the Nakama server
+- [ ] Two clients submitting a claim in the same tick are resolved in a deterministic order by server timestamp
+- [ ] Leaderboard entries update correctly after a match concludes
+- [ ] Cloud save round-trips player progress through a server restart
+
+</Accordion>
+
+<Accordion title="Phase 7 — Client Multiplayer Integration · 3 weeks">
+
+### Goal
+
+Connect the Unity client to the Nakama server. The client sends intent commands; the server sends back authoritative state. Implement matchmaking UI flow, disconnect/reconnect with a 30-second grace window, and full-state sync on rejoin.
+
+### Key Tasks
+
+| Task | Description | Est. |
+|------|-------------|------|
+| 7.1 | Implement `NakamaMultiplayerService` as an `IMultiplayerService` adapter — connect, send claims, receive server messages, convert to domain DTOs | 4 days |
+| 7.2 | Add `GameSession.ApplyServerState()` and a `WaitingForServer` state that blocks local input until the server responds | 2 days |
+| 7.3 | Implement the matchmaking UI flow: queue entry → server match found → load board | 2 days |
+| 7.4 | Handle disconnect/reconnect: store reconnect token, re-sync full state on rejoin, show grace-period countdown UI | 2 days |
+| 7.5 | Route server events (opponent disconnected, match ended, MMR delta) into the `IObservable<MatchEvent>` stream | 1 day |
+| 7.6 | Client-server interaction tests using a mock Nakama server or a local test instance | 2 days |
+
+### Dependencies
+
+Phase 3 (`GameSession` and command handling), Phase 6 (operational Nakama server).
+
+### Definition of Done
+
+- [ ] Client completes a full online match against a second client; scores match the server's authoritative record
+- [ ] Client disconnecting for < 30 seconds reconnects and resumes the match with no state divergence
+- [ ] `NakamaMultiplayerService` is the **only** class with `using Nakama;` in the client codebase
+
+</Accordion>
+
+<Accordion title="Phase 8 — UI Framework & Core Screens · 4 weeks">
+
+### Goal
+
+Build every menu screen defined in the UI Layout Specification, wire them to reactive `ViewModel` classes, and establish the `UINavigator` screen stack used by all subsequent UI work. This phase does **not** include the game board HUD (that is Phase 9) but it must be complete before Phase 9 can begin.
+
+### Key Tasks
+
+| Task | Description | Est. |
+|------|-------------|------|
+| 8.1 | Implement `UINavigator` — screen stack, push/pop, modal overlay support | 2 days |
+| 8.2 | Build Splash, Main Menu, Mode Select, Settings, Profile, Store, and Tutorial screens with placeholder assets | 5 days |
+| 8.3 | Build Single Player Setup, Multiplayer Hub (Quick Match queue, Ranked queue, Private Room lobby), and Pass & Play Setup screens | 3 days |
+| 8.4 | Implement reactive `ViewModel` classes for each screen — subscribe to `IGameStateProvider` where applicable, expose `IObservable<T>` properties | 3 days |
+| 8.5 | Implement `UIThemeService` — apply consistent colour palette, typography, and button style across all screens | 2 days |
+| 8.6 | Wire basic navigation transitions (fade, slide) via `UINavigator` | 1 day |
+| 8.7 | Implement accessibility toggles: colourblind mode, shape-assist, card size scaling (S/M/L), text-to-speech on/off | 2 days |
+
+### Dependencies
+
+Phase 3 (state machine and `IGameStateProvider` interface must exist).
+
+### Definition of Done
+
+- [ ] Full menu navigation flow is traversable end-to-end: Splash → Main Menu → Mode Select → any game-mode setup screen → back
+- [ ] All screens are visually consistent (shared theme, no hard-coded colours)
+- [ ] Colourblind mode applies texture overlays to card colour attributes and passes a contrast checker
+- [ ] All `ViewModel` subscriptions are stored in `CompositeDisposable` and disposed on screen exit
+
+</Accordion>
+
+<Accordion title="Phase 9 — Game Board HUD & Feedback · 3 weeks">
+
+### Goal
+
+Build the in-match UI: the 3D card grid, HUD, all card visual states, toast feedback, touch input routing, and the pause overlay. After this phase a real human can play a complete match through the Unity UI.
+
+### Key Tasks
+
+| Task | Description | Est. |
+|------|-------------|------|
+| 9.1 | Implement `MatchViewModel` and its sub-ViewModels: `HudTopViewModel` (scores, timer), `CardGridViewModel` (per-card state), `BottomBarViewModel` (claim zone, streak) | 3 days |
+| 9.2 | Implement `CardView` MonoBehaviour — instantiates the 3D card prefab, subscribes to per-card state (idle, selected, valid-set glow, invalid-set shake, claimed fly-off, new-deal fly-in) | 4 days |
+| 9.3 | Implement `BoardView` — arranges `CardView` instances in the 4×3 grid, handles smooth expansion to 15/18/21 | 3 days |
+| 9.4 | Implement `HudTopView`, `HudBottomView`, and `ClaimZoneView` (colour zones for Pass & Play) | 2 days |
+| 9.5 | Implement the toast/feedback system — "SET!", "No Set", penalty, opponent claimed — with configurable duration | 1 day |
+| 9.6 | Wire `TouchInputHandler` to card tap → `SelectCardCommand` and claim zone tap → `ClaimSelectedCommand` | 2 days |
+| 9.7 | Add pause menu overlay (Resume, Restart, Quit to Menu) | 1 day |
+| 9.8 | Integration test: drive a full match visually from first deal to post-match results screen | 2 days |
+
+### Dependencies
+
+Phase 8 (UI framework and navigation), art assets for card prefabs and table textures.
+
+### Definition of Done
+
+- [ ] A complete match in all three modes (Single Player, Pass & Play, Online) is playable from the board screen
+- [ ] All card visual states play the correct animation and return to idle without lingering coroutines
+- [ ] Touch input is correctly discarded during animation lock states (no ghost selections)
+- [ ] The board expands to 15 cards when `AnySetExists()` returns `false` — visually and logically
+
+</Accordion>
+
+<Accordion title="Phase 10 — Store, Settings, Profile & Stats · 1 week">
+
+### Goal
+
+Wire the non-game screens from Phase 8 to real data sources: Google Play Billing for IAPs, `ILocalSaveService` for settings, and local/cloud save for profile stats.
+
+### Key Tasks
+
+| Task | Description | Est. |
+|------|-------------|------|
+| 10.1 | Implement `StoreViewModel` with cosmetic catalogue; integrate Google Play Billing for direct-purchase IAPs | 2 days |
+| 10.2 | Implement `SettingsViewModel` — persist all settings (audio levels, penalty mode, board size, haptics, accessibility) via `ILocalSaveService` | 1 day |
+| 10.3 | Profile/Stats screen — read lifetime stats, MMR, rank, and match history from local and cloud save | 1 day |
+| 10.4 | Rewarded ad integration for SP hints and Remove-Ads IAP | 1 day |
+
+### Dependencies
+
+Phase 8 (screen shells must exist).
+
+### Definition of Done
+
+- [ ] IAP purchase flow completes end-to-end in Google Play sandbox
+- [ ] Settings changes persist across app restart
+- [ ] Profile screen displays correct values from a seeded save state
+
+</Accordion>
+
+<Accordion title="Phase 11 — Tutorial & Onboarding · 1 week">
+
+### Goal
+
+Build the interactive tutorial that teaches the Set rules through forced card selections, and wire it into the first-launch flow.
+
+### Key Tasks
+
+| Task | Description | Est. |
+|------|-------------|------|
+| 11.1 | Create interactive tutorial — step-by-step overlay arrows, forced correct Set selection, explanatory text for each attribute rule | 3 days |
+| 11.2 | First-launch flow: tutorial → practice match → main menu; flag completion in save data so it only runs once | 1 day |
+| 11.3 | Help / How-to-Play screen accessible from the Main Menu at any time | 1 day |
+
+### Dependencies
+
+Phase 9 (the tutorial runs on the game board screen).
+
+### Definition of Done
+
+- [ ] A new player who has never seen SET can complete the tutorial and then win a practice match without external help
+- [ ] Tutorial completion is flagged in save data and the tutorial does not re-run on the next launch
+- [ ] How-to-Play is reachable from the Main Menu in ≤ 2 taps
+
+</Accordion>
+
+<Accordion title="Phase 12 — Testing, Polish & Optimization · 4 weeks">
+
+### Goal
+
+Produce a release candidate. Fix all bugs found during functional testing, hit 60 fps on the target device, pass the accessibility audit, and prepare all store assets.
+
+### Key Tasks
+
+| Task | Description | Est. |
+|------|-------------|------|
+| 12.1 | Full functional test pass across all modes, all edge cases (no-Set board, simultaneous claim, disconnect mid-match), and all accessibility modes | 5 days |
+| 12.2 | Performance profiling: target 60 fps on Snapdragon 665 with 21 cards on screen; reduce draw calls, optimize shaders, profile memory | 5 days |
+| 12.3 | Network stress test: 5% packet loss, 250 ms round-trip latency, concurrent matches | 3 days |
+| 12.4 | UI/UX polish: animation curve tuning, haptic feedback pass, transition timing | 3 days |
+| 12.5 | String externalisation — move all user-visible strings to a resource file keyed for future localisation (no translations required) | 1 day |
+| 12.6 | Final accessibility audit — colourblind simulator pass, Android TalkBack screen-reader test | 1 day |
+| 12.7 | App store assets — icon, feature graphic, screenshots, privacy policy, store description | 2 days |
+
+### Dependencies
+
+All phases complete.
+
+### Definition of Done
+
+- [ ] Zero P0 or P1 bugs open
+- [ ] Stable 60 fps on Snapdragon 665 across a 10-minute play session
+- [ ] Nakama round-trip p95 ≤ 150 ms under stress test
+- [ ] All acceptance criteria from the Project Vision doc are satisfied
+- [ ] App store listing approved and release build uploaded to internal test track
+
+</Accordion>
+
+<Accordion title="Phase 13 — Launch Preparation · 1 week">
+
+### Goal
+
+Ship to Google Play. Run final QA smoke tests, configure production IAPs, and prepare launch-day monitoring on the Nakama server.
+
+### Key Tasks
+
+| Task | Description | Est. |
+|------|-------------|------|
+| 13.1 | Final QA smoke-test pass on at least two physical devices (e.g., Snapdragon 665 and 720G) | 2 days |
+| 13.2 | Upload production build to Google Play Console internal test track; configure and verify all IAPs in production | 2 days |
+| 13.3 | Set up Nakama launch-day monitoring (dashboards, auto-scaling policy, on-call runbook) | 1 day |
+
+### Dependencies
+
+Phase 12 release candidate build approved.
+
+### Definition of Done
+
+- [ ] App is live in the Google Play internal test track and installable by test accounts
+- [ ] All IAPs purchase and restore correctly in the production environment
+- [ ] Nakama monitoring dashboard is active and alerting is configured
+
+</Accordion>
+
+</AccordionGroup>
+
+---
+
+## Related Pages
+
+<CardGroup cols={2}>
+  <Card title="Roadmap Overview" icon="map" href="/roadmap/overview">
+    High-level timeline table, critical path, risk register, and success criteria.
+  </Card>
+  <Card title="PR Checklist" icon="circle-check" href="/standards/pr-checklist">
+    The Definition of Done checklist that every pull request must pass before merge.
+  </Card>
+  <Card title="Coding Conventions" icon="code" href="/standards/conventions">
+    Naming, formatting, and class design rules applied across every phase.
+  </Card>
+  <Card title="Testing Standards" icon="flask" href="/standards/testing">
+    Unit test setup, coverage targets, and CI integration requirements.
+  </Card>
+</CardGroup>

@@ -1,0 +1,119 @@
+---
+title: "Implementation Roadmap: From Setup to Google Play Launch"
+sidebarTitle: "Overview"
+description: "13-phase development roadmap for SET: 3D Edition from project foundation through multiplayer, polish, and Google Play release in 22–26 weeks."
+---
+
+This document gives every contributor a shared understanding of where the project is going, how the work is sequenced, and which phases are on the critical path. Whether you are ramping up on the codebase or planning a sprint, treat this as the single source of truth for scope and timeline. All estimates assume a small, focused team working roughly 40-hour engineering weeks at moderate-to-high Unity and Nakama proficiency.
+
+<Warning>
+  **SET: 3D Edition is pre-production.** Nothing has been built yet. Every phase and task described here is a plan — not a record of completed work. Treat all timelines as living estimates that must be updated as sprints progress.
+</Warning>
+
+## High-Level Timeline
+
+The project is divided into 13 sequential-and-parallel phases spanning roughly **22–26 calendar weeks** (5.5–6.5 months). Phases that share no hard dependencies can proceed concurrently — see [Parallel Work Opportunities](#parallel-work-opportunities) below.
+
+| Phase | Name | Duration | Status |
+|-------|------|----------|--------|
+| 1 | Project Setup & Foundation | 2 weeks | Planned |
+| 2 | Core Domain & Gameplay | 3 weeks | Planned |
+| 3 | Application Layer & State Machine | 2 weeks | Planned |
+| 4 | Single Player + AI | 3 weeks | Planned |
+| 5 | Pass & Play | 1 week | Planned |
+| 6 | Nakama Backend | 4 weeks | Planned |
+| 7 | Client Multiplayer Integration | 3 weeks | Planned |
+| 8 | UI Framework & Core Screens | 4 weeks | Planned |
+| 9 | Game Board HUD & Feedback | 3 weeks | Planned |
+| 10 | Store, Settings, Profile & Stats | 1 week | Planned |
+| 11 | Tutorial & Onboarding | 1 week | Planned |
+| 12 | Testing, Polish & Optimization | 4 weeks | Planned |
+| 13 | Launch Preparation | 1 week | Planned |
+| **Total** | | **~22–26 weeks** | — |
+
+---
+
+## Critical Path
+
+The critical path is the sequence of phases where a delay in any one phase directly delays everything after it. The three bottlenecks are:
+
+1. **Phase 2 — Core Domain & Gameplay** must be complete and fully tested before any game mode can work. `SetValidator`, `Deck`, `Board`, and `GameSession` are the foundation everything else builds on. Do not rush this phase.
+2. **Phase 6 — Nakama Backend** is the project's longest external dependency (4 weeks) and requires meaningful Nakama/TypeScript expertise. Start the backend work as early as possible — ideally in parallel with Phase 4 — so it does not gate the multiplayer client work in Phase 7.
+3. **Phase 8 — UI Framework & Core Screens** is a 4-week dependency for both Phase 9 (game board HUD) and Phase 10 (store, settings, profile). It can begin as soon as Phase 3 is finished and the state machine wiring is established. UI work and domain work can run concurrently.
+
+---
+
+## Parallel Work Opportunities
+
+Not everything has to be sequential. The following tracks can progress independently:
+
+- **3D / UI artist:** Card models, table textures, symbol packs, and UI assets can be produced from day one. None of these block or are blocked by code phases — just ensure the art spec is locked before Phase 9 starts so assets are ready for `CardView` integration.
+- **Backend developer:** Nakama server setup (Phase 6) can begin immediately after Phase 2 concludes. The backend developer can work concurrently with the client team who is building the Application layer and Single Player modes (Phases 3–5).
+- **Single Player first, multiplayer layered on:** Phases 4 and 5 (AI and Pass & Play) validate the entire game loop without any network dependency. Build and test those first, then layer Phase 7 (online multiplayer) on top of a proven `GameSession`.
+
+---
+
+## Team Composition
+
+These docs assume the following structure. Adjust to your actual team, but maintain at minimum one person responsible for each track.
+
+| Role | Count | Primary Phases |
+|------|-------|----------------|
+| Unity / C# Developer | 2–3 | 1–5, 7–12 |
+| Backend Developer | 1 | 6, 7 |
+| 3D / UI Artist | 1 | 1 (assets), 8–11 |
+| QA Engineer | 1 (part-time early, full-time Phase 12) | 2–5 (unit test review), 12–13 |
+
+---
+
+## Risk Register
+
+Identify these risks early and apply the mitigations proactively — do not wait until a phase is underway.
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| Nakama learning curve | Multiplayer delay | Run a Nakama spike in week 1 of Phase 6; evaluate Heroic Cloud for managed hosting to reduce ops burden |
+| 21 cards at 60 fps on mid-range Android | Low FPS / dropped frames | Target a Snapdragon 665 device from Phase 9 onward; profile draw calls, use simple geometry and LODs |
+| Multiplayer race conditions | Unfair or disputed outcomes | Deterministic 20 Hz server tick loop; server-side tests for simultaneous claim resolution |
+| Scope creep | Schedule overrun beyond 6 months | Strictly enforce the [Hard Boundaries](/standards/conventions); all new requests need a formal change request before any implementation begins |
+| Third-party SDK breaking changes (Nakama, R3) | Compilation failures mid-sprint | Pin package versions; test upgrades on a branch before merging to main |
+
+---
+
+## Success Criteria
+
+A v1.0 release is considered successful when **all** of the following are true:
+
+<CardGroup cols={2}>
+  <Card title="Multiplayer Integrity" icon="shield-check">
+    Fewer than **0.5%** of completed multiplayer matches generate a disputed claim support ticket.
+  </Card>
+  <Card title="Performance" icon="gauge-high">
+    Stable **60 fps** on a mid-tier Snapdragon 665 Android device with all 21 cards on screen.
+  </Card>
+  <Card title="Network Latency" icon="wifi">
+    Nakama round-trip latency under **150 ms at the p95 percentile** during normal play.
+  </Card>
+  <Card title="Logic Consistency" icon="code-branch">
+    **Zero logic divergence** across Single Player, Pass & Play, and Online Multiplayer — enforced by a shared `SetValidator` test suite run in CI.
+  </Card>
+</CardGroup>
+
+---
+
+## Related Pages
+
+<CardGroup cols={2}>
+  <Card title="Phase-by-Phase Breakdown" icon="list-check" href="/roadmap/phases">
+    Goals, key tasks, dependencies, and Definition of Done for every phase.
+  </Card>
+  <Card title="Coding Conventions" icon="code" href="/standards/conventions">
+    Mandatory naming, formatting, and class design rules for the codebase.
+  </Card>
+  <Card title="Approved Patterns & Anti-Patterns" icon="diagram-project" href="/standards/patterns">
+    Which design patterns to use and which are explicitly banned.
+  </Card>
+  <Card title="PR Checklist" icon="circle-check" href="/standards/pr-checklist">
+    The merge gate every contributor must clear before a PR lands.
+  </Card>
+</CardGroup>

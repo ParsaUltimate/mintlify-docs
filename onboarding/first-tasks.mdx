@@ -1,0 +1,229 @@
+---
+title: "First Contributor Tasks for SET: 3D Edition Developers"
+sidebarTitle: "First Tasks"
+description: "Practical starter tasks for new contributors covering Domain layer tests, SetValidator, Board logic, and navigating the architecture safely."
+---
+
+Your first contributions to SET: 3D Edition should build confidence in the architecture before you touch complex systems. This page gives you a concrete sequence of tasks — each one small, testable, and firmly inside the Domain layer where there are no Unity lifecycle concerns and no Nakama dependency in sight.
+
+<Warning>
+  **Pre-production** — SET: 3D Edition is being built from the ground up. Early contributors are laying the foundation, not patching an existing game. What you build here will be the canonical implementation others build on top of.
+</Warning>
+
+## Why this page exists
+
+"Just read the code and find something to fix" is terrible onboarding advice for a pre-production project. This page gives you a defined ramp: understand the rules, prove your understanding through tests, then expand outward. Every task here is designed to be completable without running Unity at all.
+
+---
+
+## Philosophy: start in the Domain, prove with tests
+
+The Domain layer is pure C# — no `UnityEngine`, no Nakama, no R3. It compiles and runs in any .NET environment. This means you can write and run unit tests from Unity's EditMode test runner in seconds, without entering Play mode.
+
+Starting here serves two purposes:
+1. **You learn the game's core logic** by implementing it, not just reading about it.
+2. **You leave behind a test suite** that protects everyone who comes after you.
+
+Once your Domain tests pass, you'll have the vocabulary and the context to understand what `GameSession` in the Application layer is doing — and why the reactive streams flowing into Presentation look the way they do.
+
+---
+
+## Starter tasks
+
+<Steps>
+  <Step title="Read the game rules and domain model docs">
+    Before writing code, understand what you're modelling. Read:
+
+    - **`/game-design/rules`** — the complete unambiguous SET rules, including the all-same-or-all-different attribute check, board expansion logic, and win conditions.
+    - **`/core-gameplay/card-model`** — the domain model document covering `Card`, `CardAttributes`, `Board`, `Match`, and the identity scheme.
+
+    You're looking for answers to: *What makes three cards a valid Set? When does the board expand? What is the aggregate root?*
+  </Step>
+
+  <Step title="Implement SetValidator — pure C#, TDD">
+    `SetValidator` is a stateless domain service that answers one question: *are these three cards a valid Set?* It is the most important class in the project and the natural place to start.
+
+    Create `Assets/_Project/Domain/Services/SetValidator.cs` implementing `ISetValidator`:
+
+    ```csharp
+    public interface ISetValidator
+    {
+        SetResult Validate(IReadOnlyList<Card> threeCards);
+        IReadOnlyList<Card[]> FindAllSets(IReadOnlyList<Card> boardCards);
+        bool AnySetExists(IReadOnlyList<Card> boardCards);
+    }
+    ```
+
+    Write your unit tests **first**. Create `Assets/_Tests/EditMode/SetValidatorTests.cs` and cover these cases before touching the implementation:
+
+    - All four attributes all-same → valid
+    - All four attributes all-different → valid
+    - Three cards where one attribute has two of one value and one of another → invalid
+    - `FindAllSets` on a 12-card board returns the expected number of Sets
+    - `AnySetExists` returns `false` when no valid Set is present
+
+    The validation rule is identical for all four attributes: for any given attribute, the three cards must show either **all the same value** or **all three different values**. Two-same, one-different is always invalid.
+
+    `SetValidator` is also used server-side as the authoritative implementation — keep it deterministic and allocation-light.
+  </Step>
+
+  <Step title="Write tests for Deck">
+    `Deck` encapsulates the 81-card collection and its draw logic. Create tests in `SetValidatorTests.cs` or a separate `DeckTests.cs`:
+
+    - Shuffle with a fixed seed produces a deterministic card order (run twice, compare results)
+    - Draw N cards removes exactly N cards from the deck
+    - Draw from an empty deck returns an empty result without throwing
+    - No card appears more than once across the full 81-card deck (verify the complete set of `CardId` values)
+
+    The full deck contains exactly 81 cards — one for every combination of the four attributes (3 × 3 × 3 × 3 = 81). Each card has a unique `CardId` computed as:
+
+    ```
+    CardId = (Number - 1) × 27 + Shape × 9 + Color × 3 + Shading
+    ```
+
+    This gives IDs in the range 0–80 with no collisions.
+  </Step>
+
+  <Step title="Write tests for Board">
+    `Board` manages the active card grid. Write tests in `BoardTests.cs`:
+
+    - Place a card in an empty slot — slot reports occupied
+    - Remove a card from an occupied slot — slot reports empty
+    - Board starts with 12 cards (4 × 3 grid) in standard configuration
+    - Board expands to 15 cards when no Set is present (3 new slots added)
+    - Board cannot expand beyond 21 cards (7 × 3 maximum)
+    - Removing a Set from a full-expansion board contracts back to 12 if enough cards remain
+
+    Slot invariants: a `CardSlot` can hold exactly zero or one `Card`. Placing a second card in an occupied slot should return an error result, not throw.
+  </Step>
+
+  <Step title="Read the Interface Contracts doc">
+    Once your Domain tests pass, read **`/architecture/layers`** and the interface contracts document (if available) to understand how `GameSession` in the Application layer consumes `ISetValidator` and `IAIScanner`. You'll see that `GameSession` is instantiated with these interfaces injected via constructor — it never calls `new SetValidator()` directly.
+
+    This prepares you for the next step without requiring you to change anything.
+  </Step>
+
+  <Step title="Explore the GameSession stub in Application">
+    Look at `Assets/_Project/Application/Sessions/GameSession.cs`. You're not modifying it yet — you're reading it to understand:
+
+    - How it receives `ISetValidator` and `IAIScanner` via constructor injection
+    - How it manages the `MatchState` enum transitions
+    - How it emits state and events as R3 observables through `IGameStateProvider`
+
+    When you're ready to contribute Application-layer work, start by adding test coverage for `GameSession` state transitions using NSubstitute mocks for `ISetValidator` and `IAIScanner`.
+  </Step>
+</Steps>
+
+---
+
+## Key types you'll work with
+
+### Card attributes and enums
+
+The four domain enums define every possible card attribute value:
+
+```csharp
+public enum Number  { One = 1, Two = 2, Three = 3 }
+public enum Shape   { Diamond = 0, Squiggle = 1, Oval = 2 }
+public enum Color   { Red = 0, Green = 1, Purple = 2 }
+public enum Shading { Solid = 0, Striped = 1, Open = 2 }
+```
+
+`CardAttributes` bundles them into a single immutable value object:
+
+```csharp
+public readonly struct CardAttributes
+{
+    public Number  Number   { get; }
+    public Shape   Shape    { get; }
+    public Color   Color    { get; }
+    public Shading Shading  { get; }
+}
+```
+
+### ISetValidator interface
+
+```csharp
+public interface ISetValidator
+{
+    SetResult Validate(IReadOnlyList<Card> threeCards);
+    IReadOnlyList<Card[]> FindAllSets(IReadOnlyList<Card> boardCards);
+    bool AnySetExists(IReadOnlyList<Card> boardCards);
+}
+```
+
+### SetResult struct
+
+`SetResult` is returned instead of throwing exceptions. Domain errors are values, not exceptions.
+
+```csharp
+public readonly struct SetResult
+{
+    public bool    IsValid       { get; }
+    public string? InvalidReason { get; } // e.g. "Color is mixed (two Red, one Green)"
+}
+```
+
+---
+
+## Test naming convention
+
+All test method names follow the pattern `MethodName_Scenario_ExpectedBehavior`:
+
+```csharp
+// Good examples
+Validate_AllDifferentAttributes_ReturnsValid()
+Validate_TwoSameOneColorDifferent_ReturnsInvalid()
+FindAllSets_EmptyBoard_ReturnsEmptyList()
+AnySetExists_BoardWithNoValidSet_ReturnsFalse()
+Draw_EmptyDeck_ReturnsEmptyCollection()
+```
+
+Keep the scenario segment specific enough to diagnose a failure without opening the test body.
+
+---
+
+## PR checklist for Domain work
+
+Before you mark a pull request ready for review, confirm:
+
+- [ ] All new and existing EditMode tests pass (run via **Window → General → Test Runner** in Unity)
+- [ ] No `using UnityEngine;` anywhere in `SET.Domain` or `SET.Application`
+- [ ] No `using Nakama;` anywhere in `SET.Domain` or `SET.Application`
+- [ ] Naming conventions followed — `MethodName_Scenario_ExpectedBehavior` for tests
+- [ ] `SetResult` returned for invalid input; no exceptions thrown from domain services
+- [ ] Value objects (`CardAttributes`, `SetResult`) are immutable (`readonly struct`)
+- [ ] All test methods have clear, descriptive names
+
+---
+
+## Common mistakes
+
+<Warning>
+  **Common mistakes on first contributions:**
+
+  - **Writing game logic in a MonoBehaviour** — the `Update()` loop is for visual animation only. Set validation, score calculation, and board logic all live in the Domain and Application layers, not in views.
+  - **Skipping the tests** — this project uses TDD for Domain logic. Writing the implementation first and the tests after is backwards; tests written after implementation tend to be shaped around what the code does rather than what it should do.
+  - **Using `FindObjectOfType` or `GameObject.Find`** — banned everywhere. Domain and Application code has zero Unity references; Presentation code uses VContainer constructor injection.
+  - **Throwing exceptions for invalid Sets** — `ISetValidator.Validate` returns a `SetResult` with `IsValid = false` and a reason string. Exceptions are for exceptional, unrecoverable states only.
+  - **Adding a `using R3;` import to Domain classes** — R3 is a Presentation/Application concern. Domain types are plain C#; they do not depend on any reactive framework.
+</Warning>
+
+---
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Repo Tour" icon="folder-tree" href="/onboarding/repo-tour">
+    Understand the folder hierarchy and assembly boundaries before you start editing.
+  </Card>
+  <Card title="Card Model" icon="cards" href="/core-gameplay/card-model">
+    The full domain model — Card, Board, Match aggregate root, and CardId scheme.
+  </Card>
+  <Card title="Set Validation" icon="circle-check" href="/core-gameplay/set-validation">
+    Deep dive into the SetValidator algorithm and edge cases.
+  </Card>
+  <Card title="Engineering Standards" icon="shield-check" href="/standards/conventions">
+    Naming conventions, formatting rules, and the complete PR checklist.
+  </Card>
+</CardGroup>

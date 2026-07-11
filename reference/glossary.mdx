@@ -1,0 +1,269 @@
+---
+title: "Complete Glossary of Terms for SET: 3D Edition Dev"
+sidebarTitle: "Glossary"
+description: "Comprehensive A-Z glossary of all domain terms, architecture terms, and technology terms used across SET: 3D Edition documentation and codebase."
+---
+
+This glossary is the **single source of truth** for terminology used across the codebase, documentation, and day-to-day team discussions. When a concept has a name here, use that exact name — in code, in code reviews, in PRs, and in Slack. Using synonyms or paraphrases where precise terms exist introduces ambiguity that compounds quickly across a multi-layer codebase.
+
+<Tip>
+  These terms map directly to class names, interface names, enum values, and method names in the codebase. Using different words — for example, writing `"hand"` instead of `"selection"` or `"board check"` instead of `"AnySetExists"` — causes confusion during reviews and may indicate a misunderstood concept. When in doubt, consult this page first.
+</Tip>
+
+---
+
+## Domain & Game Terms
+
+<dl>
+  <dt>**AnySetExists**</dt>
+  <dd>
+    A method on `ISetValidator` that returns `bool`. It scans every combination of three cards on the current board and returns `true` if at least one valid Set exists. Called after **every** board mutation — after a refill, after an expansion, and after the initial deal — to determine whether the game should expand the board or end.
+  </dd>
+
+  <dt>**Attribute**</dt>
+  <dd>
+    One of the four properties that define a Card: **Number**, **Shape**, **Color**, and **Shading**. Each attribute has exactly three possible values. All four attributes must satisfy the all-same/all-different rule for a Set to be valid.
+  </dd>
+
+  <dt>**Board**</dt>
+  <dd>
+    The collection of face-up `CardSlot`s arranged in a 4-column grid. The Board holds between 12 and 21 slots depending on how many expansions have occurred. Importantly, the Board entity **does not own** Set-validation logic — that responsibility lives in `SetValidator`.
+  </dd>
+
+  <dt>**BoardIdle**</dt>
+  <dd>
+    A `MatchState` enum value indicating the board is fully dealt, no cards are selected, and the game is waiting for the first player interaction. The starting state after each refill or expansion animation completes.
+  </dd>
+
+  <dt>**Campaign Mode**</dt>
+  <dd>
+    A planned Single Player game mode consisting of a linear series of matches against AI opponents of progressively increasing difficulty. No branching paths and no narrative. Planned for v1.0; implementation begins in a later phase.
+  </dd>
+
+  <dt>**Card**</dt>
+  <dd>
+    An **immutable value object** defined by exactly four attribute values. One of 81 unique game pieces. A Card's identity *is* its attributes — two Cards with identical attributes are considered equal (`IEquatable<Card>` is implemented). Cards have no behaviour beyond equality and attribute access.
+  </dd>
+
+  <dt>**CardAttributes**</dt>
+  <dd>
+    A `readonly struct` that bundles the four attribute enum values (`Number`, `Shape`, `Color`, `Shading`) for a single Card. Used internally by `Card` and may be used standalone by validation logic.
+  </dd>
+
+  <dt>**CardId**</dt>
+  <dd>
+    A 0-based integer (range 0–80) that uniquely encodes a Card's four attributes. Formula:
+    ```
+    Id = (Number - 1) * 27 + Shape * 9 + Color * 3 + Shading
+    ```
+    Used in network messages and save files as a compact card reference. See [Data Formats](/reference/data-formats) for the full encoding/decoding reference.
+  </dd>
+
+  <dt>**CardSlot**</dt>
+  <dd>
+    A `struct` holding an `int Index` (fixed grid position, 0-based) and a `Card?` (the occupying card, or `null` if the slot is empty). CardSlot is a value object; it represents one position on the Board.
+  </dd>
+
+  <dt>**Claim**</dt>
+  <dd>
+    The action of a player submitting exactly three selected cards for validation. In Single Player and Pass & Play, the claim is triggered automatically when the third card is selected (or when the player taps their claim zone in Pass & Play Tap-Zone mode). In Online Multiplayer, the claim is sent to the server as a `match_claim` message.
+  </dd>
+
+  <dt>**Daily Challenge**</dt>
+  <dd>
+    A planned Single Player mode that presents a fixed-seed board — identical for every player on that calendar day. Players compete on a global leaderboard ranked by fastest clear time. The seed is server-provided and deterministic; users cannot select their own seed.
+  </dd>
+
+  <dt>**Deck**</dt>
+  <dd>
+    The ordered stack of remaining undealt cards, containing at most 81 cards at game start. Cards flow **out** of the Deck (via `Draw()`) and never back in. `CardsRemaining` tracks how many are left. The Deck enforces that it never holds duplicate cards.
+  </dd>
+
+  <dt>**Expansion**</dt>
+  <dd>
+    The process of adding three **new slots** to the Board because no valid Set exists among the current face-up cards. The Board grows: 12 → 15 → 18 → 21 slots. Expansion is capped at 21; if no Set exists at 21 cards and the deck is empty, the game ends immediately. Contrast with **Refill**, which fills existing empty slots.
+  </dd>
+
+  <dt>**FindAllSets**</dt>
+  <dd>
+    A method on `ISetValidator` that returns `IReadOnlyList<Card[]>` containing every valid 3-card combination from the current board. Used by the AI to choose its next claim and by the hint system to identify hint candidates.
+  </dd>
+
+  <dt>**GameRules**</dt>
+  <dd>
+    An immutable value object holding the configuration for a single match: `InitialBoardSize` (12, 15, or 18), `PenaltyMode` (None / Time / Point), `IsTimed` (bool), and `TimeLimitSeconds` (float). Created once at match start and never mutated.
+  </dd>
+
+  <dt>**GameSession**</dt>
+  <dd>
+    The central Application-layer orchestrator. It is the **state machine** for a match and implements both `IMatchOrchestrator` (accepts commands) and `IGameStateProvider` (exposes reactive streams to Presentation). All game mode logic — Single Player, Online, Pass & Play — flows through `GameSession`.
+  </dd>
+
+  <dt>**GameStateSnapshot**</dt>
+  <dd>
+    An immutable DTO emitted by `IGameStateProvider.StateStream` on every state change. The Presentation layer subscribes to this stream and derives all UI updates from it. Snapshots are never mutated after emission.
+  </dd>
+
+  <dt>**Match**</dt>
+  <dd>
+    The complete game session, encompassing the Board, the Deck, all Players, the GameRules configuration, and the current MatchState. At the domain level, `Match` is the aggregate root; all state changes must go through its public methods.
+  </dd>
+
+  <dt>**MatchEnd**</dt>
+  <dd>
+    A `MatchState` enum value indicating the game is over. Reached when: (1) the deck is empty and no valid Set remains on the board, (2) the board is at 21 cards with no Set and the deck is exhausted, or (3) the match timer expires in Timed Mode.
+  </dd>
+
+  <dt>**MatchEvent**</dt>
+  <dd>
+    The abstract base class for discrete domain events published to `IGameStateProvider.EventStream`. Concrete subtypes include `SetClaimedEvent`, `BoardRefilledEvent`, `BoardExpandedEvent`, and `MatchEndedEvent`. Events are one-way notifications; they carry data but do not expect a reply.
+  </dd>
+
+  <dt>**PenaltyMode**</dt>
+  <dd>
+    An enum with three values:
+    - `None` — submitting an invalid Set has no consequence beyond deselection.
+    - `Time` — the player's remaining match time is reduced by 5 seconds (configurable).
+    - `Point` — the player's score is reduced by 1 (floor 0).
+
+    Configured per match via `GameRules` and cannot change mid-match.
+  </dd>
+
+  <dt>**Player**</dt>
+  <dd>
+    An entity with a unique `PlayerId` (int), a mutable `Score` (int, floor 0), a `Penalties` count (int, floor 0), and a `PlayerType` (Human / AI / Remote). `Score` and `Penalties` are the only mutable fields; identity is determined solely by `PlayerId`.
+  </dd>
+
+  <dt>**Refill**</dt>
+  <dd>
+    The process of drawing cards from the Deck and placing them into the empty slots left behind after a valid Set is removed. Refill fills existing slots; it does **not** add new slots. If the Deck is empty, slots remain empty. Contrast with **Expansion**, which adds new slots.
+  </dd>
+
+  <dt>**Rubber-band Assist**</dt>
+  <dd>
+    An optional toggle in Single Player modes. When enabled: if the human player's Set count falls 3 or more behind the AI opponent's count, the AI temporarily shifts to an easier difficulty tier, reducing its reaction speed. The effect is reversed once the player catches up. This is a configurable rule-based toggle, not an adaptive neural system.
+  </dd>
+
+  <dt>**Set**</dt>
+  <dd>
+    A group of **exactly three cards** where, for each of the four attributes independently, the three values are either **all the same** or **all different**. A "mixed" attribute (two cards sharing a value, one different) makes the combination invalid. This rule is the core mechanic of the game.
+  </dd>
+
+  <dt>**SetResult**</dt>
+  <dd>
+    A `readonly struct` returned by `ISetValidator.Validate()`. Contains `bool IsValid` and `string? InvalidReason`. When `IsValid` is `false`, `InvalidReason` names the failing attribute (e.g., `"Color is mixed"`).
+  </dd>
+
+  <dt>**SetValidator**</dt>
+  <dd>
+    The **stateless domain service** that implements `ISetValidator`. It is a pure function with no side effects: the same inputs always produce the same output. It is designed to run identically on the Unity client and the Nakama server, ensuring consistent validation in all game modes.
+  </dd>
+
+  <dt>**Slot**</dt>
+  <dd>
+    Synonym for **CardSlot**. A fixed grid position that can hold one Card or be empty. Used interchangeably in verbal discussion; the codebase uses `CardSlot`.
+  </dd>
+
+  <dt>**Tick**</dt>
+  <dd>
+    One iteration of the Nakama Match Handler loop, running at **20 Hz** (every 50 ms). All multiplayer claim messages received within a single tick are processed together; the server resolves ordering by message timestamp and, for true ties, by lower session ID.
+  </dd>
+
+  <dt>**Validate**</dt>
+  <dd>
+    The `ISetValidator.Validate(IReadOnlyList<Card> threeCards)` method. Checks whether exactly three cards form a valid Set and returns a `SetResult`. Throws if the input does not contain exactly three cards.
+  </dd>
+</dl>
+
+---
+
+## Architecture & Technology Terms
+
+<dl>
+  <dt>**asmdef**</dt>
+  <dd>
+    A Unity **Assembly Definition** file (`.asmdef`). Each project layer — Domain, Application, Infrastructure, Presentation — has its own asmdef. References between asmdefs are explicitly declared, which means the compiler enforces layer boundaries at build time. A Domain class cannot reference a Unity or Nakama type because no such reference is declared in the Domain asmdef.
+  </dd>
+
+  <dt>**Bootstrap scene**</dt>
+  <dd>
+    The Unity entry scene that runs first on application start. Its sole responsibility is configuring the **VContainer** DI container: registering all concrete implementations against their interfaces and binding cross-cutting services. After setup, it loads the Main Menu scene.
+  </dd>
+
+  <dt>**Clean Architecture**</dt>
+  <dd>
+    The layering pattern used throughout the project. Dependencies flow **inward only**:
+    ```
+    Domain ← Application ← Infrastructure
+                          ← Presentation
+    ```
+    The Domain layer has zero external dependencies. Application depends only on Domain. Infrastructure and Presentation depend on Application (via interfaces) but never on each other.
+  </dd>
+
+  <dt>**Constructor injection**</dt>
+  <dd>
+    The DI pattern used throughout the codebase. Every class that has dependencies declares them as **constructor parameters**. VContainer resolves and provides those dependencies at runtime. Avoid using `GetComponent<T>()` or singletons to satisfy dependencies in Application-layer and above code.
+  </dd>
+
+  <dt>**IGameCommand**</dt>
+  <dd>
+    A marker interface for all input commands passed into `IMatchOrchestrator.HandleCommand()`. Concrete commands include `SelectCardCommand`, `DeselectCardCommand`, `ClaimSelectedCommand`, and `StartMatchCommand`. Commands carry data but do not contain logic.
+  </dd>
+
+  <dt>**IGameStateProvider**</dt>
+  <dd>
+    An Application-layer interface that exposes two reactive streams to the Presentation layer: `StateStream` (emits `GameStateSnapshot` on every state change) and `EventStream` (emits `MatchEvent` instances for discrete occurrences). Presentation subscribes to these and never calls Application methods directly except through `IMatchOrchestrator`.
+  </dd>
+
+  <dt>**IMatchOrchestrator**</dt>
+  <dd>
+    An Application-layer interface with two methods: `StartMatch(GameRules rules, Player[] players)` and `HandleCommand(IGameCommand command)`. This is the only entry point for Presentation code to drive game logic. `GameSession` implements this interface.
+  </dd>
+
+  <dt>**IMultiplayerService**</dt>
+  <dd>
+    An Application-layer interface that abstracts all communication with the Nakama backend. Implemented in the Infrastructure layer by a concrete `NakamaMultiplayerService` class. Presentation and Application code depends only on this interface — it has no knowledge of Nakama types.
+  </dd>
+
+  <dt>**Nakama**</dt>
+  <dd>
+    The open-source game server used as the authoritative backend for SET: 3D Edition. Nakama handles: real-time multiplayer match hosting and validation, matchmaking (Quick Match and Ranked), leaderboards (Daily Challenge), cloud save storage, and player authentication. It runs server-side TypeScript match handlers that mirror the `SetValidator` logic.
+  </dd>
+
+  <dt>**R3**</dt>
+  <dd>
+    The reactive extensions library by **Cysharp** used for all UI state management. Provides `IObservable<T>`, `Subject<T>`, `ReactiveProperty<T>`, and operators (`Buffer`, `DistinctUntilChanged`, `ThrottleFirst`, `ObserveOnMainThread`). Replaces direct `UnityEvent` and C# event usage in Presentation code. All UI updates flow through R3 streams.
+  </dd>
+
+  <dt>**ReactiveProperty\<T\>**</dt>
+  <dd>
+    An R3 type that wraps a value and notifies all subscribers whenever the value changes. Used in ViewModels to expose derived state (e.g., `ReactiveProperty<int> PlayerScore`). Views subscribe in `Start()` and unsubscribe in `OnDestroy()` using a `CompositeDisposable`.
+  </dd>
+
+  <dt>**VContainer**</dt>
+  <dd>
+    The constructor-injection DI container used in this project. Configured in the Bootstrap scene via a `LifetimeScope`. Chosen over Zenject for its simpler registration API, lower runtime allocations, and strong support for Unity's `MonoBehaviour` lifecycle. All bindings are explicit; no auto-scanning.
+  </dd>
+
+  <dt>**ViewModel**</dt>
+  <dd>
+    A pure C# class (no `MonoBehaviour`) that sits between the Application layer and a Unity View (MonoBehaviour). It subscribes to `IGameStateProvider` streams, transforms raw `GameStateSnapshot` data into UI-friendly values, and exposes those values as `ReactiveProperty<T>` fields. Views bind to the ViewModel's properties, never to Application interfaces directly.
+  </dd>
+</dl>
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Data Formats" icon="file-code" href="/reference/data-formats">
+    CardId encoding, JSON config schemas, save format, and network message envelopes.
+  </Card>
+  <Card title="FAQ" icon="circle-question" href="/reference/faq">
+    Common contributor questions on setup, architecture, rules, and scope.
+  </Card>
+  <Card title="Domain Model" icon="diagram-project" href="/architecture/layers">
+    How Domain, Application, Infrastructure, and Presentation layers are structured.
+  </Card>
+  <Card title="Set Validation" icon="check-double" href="/core-gameplay/set-validation">
+    Deep-dive into the SetValidator algorithm and invariant enforcement.
+  </Card>
+</CardGroup>

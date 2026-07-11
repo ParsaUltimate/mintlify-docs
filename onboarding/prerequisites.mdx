@@ -1,0 +1,165 @@
+---
+title: "Prerequisites for Contributing to SET: 3D Edition Game"
+sidebarTitle: "Prerequisites"
+description: "Everything you need before your first commit: required software, accounts, recommended knowledge, and setup steps for the SET: 3D Edition Unity project."
+---
+
+Before you write a single line of code, this page gets you from a blank machine to a compilable project. It lists every tool you need, the accounts that matter, what you should already know, and — just as importantly — what you do **not** need to know before you can start contributing.
+
+<Warning>
+  **Pre-production** — SET: 3D Edition has no playable build yet. You will compile, run tests, and explore the architecture, but there is no shippable game to launch. Features marked **Planned** describe intended behaviour, not working code.
+</Warning>
+
+## Why this page exists
+
+New contributors often lose hours to a mismatched Unity version, a missing Git LFS install, or a fruitless attempt to test multiplayer without a running Nakama server. This checklist prevents all three. Work through it top to bottom exactly once, then never again.
+
+---
+
+## Required software
+
+| Tool | Version / Notes | Why it's needed |
+|------|----------------|-----------------|
+| **Unity Hub** | Latest stable | Manages Unity installs and projects |
+| **Unity 2022.3 LTS** | Must include **Android Build Support** module | Project engine version — mismatches cause import errors |
+| **Android SDK & NDK** | Installed automatically via Unity Hub's Android Build Support | Required to build and test Android targets |
+| **Git** | Any recent version | Version control |
+| **Git LFS** | Any recent version | Large binary assets (textures, audio) are stored in LFS — missing this breaks the repo |
+| **IDE: JetBrains Rider** *(recommended)* **or VS 2022** with Unity plugin | Latest stable | Full C# IntelliSense, asmdef awareness, test runner |
+| **.NET SDK** | Compatible with Unity 2022 (currently .NET Standard 2.1 / .NET 6) | Required for `dotnet format` and Roslyn analyzers outside Unity |
+| **Docker** | Any recent version | **Optional** — only needed when developing Nakama multiplayer features locally |
+
+<Tip>
+  Rider's Unity integration understands `.asmdef` assembly boundaries out of the box. VS 2022 needs the **Game Development with Unity** workload plus the Unity extension installed separately.
+</Tip>
+
+---
+
+## Required accounts
+
+| Account | When you need it |
+|---------|-----------------|
+| **GitHub** — access to `ParsaUltimate/Set-3D-Game` | Day one — you cannot clone the repo without it |
+| **Google Play Console** | Release preparation only — not needed for local development |
+
+Ask the project lead to add your GitHub account to the repository before you proceed.
+
+---
+
+## Recommended knowledge
+
+You don't need to be an expert in every area, but the following will make your first week significantly smoother.
+
+**Essential (you'll need these immediately):**
+- C# fundamentals — classes, interfaces, generics, `async/await`
+- Unity basics — GameObjects, MonoBehaviours, the Inspector, scene management
+
+**Helpful (you'll hit these quickly):**
+- Clean Architecture concepts — dependency inversion, layer separation, programming to interfaces rather than concrete types
+- Basic reactive programming — what an `Observable<T>` is and how `Subscribe()` works. The project uses [R3 by Cysharp](https://github.com/Cysharp/R3); prior UniRx experience transfers directly
+
+**Only needed for specific areas:**
+- Nakama SDK — only relevant for Infrastructure layer work (multiplayer, leaderboards, cloud save)
+- VContainer — the project's DI container. The [VContainer docs](https://vcontainer.hadashiapps.com/) are short and readable; skim them before touching `Bootstrap`
+
+---
+
+## What you do NOT need to know to start
+
+- Nakama server administration or deployment
+- Android app signing and release workflows
+- CI/CD pipeline configuration
+- Google Play Games Services SDK internals
+
+Domain and Application layer work requires nothing beyond C# and Unity's test runner. Start there.
+
+---
+
+## Setup steps
+
+<Steps>
+  <Step title="Install Unity Hub and Unity 2022.3 LTS">
+    Download [Unity Hub](https://unity.com/download) and install it. From Hub, install **Unity 2022.3 LTS** and make sure to tick the **Android Build Support** module (which includes the Android SDK, NDK, and JDK). Leave the iOS module unticked — iOS is out of scope for v1.0.
+  </Step>
+
+  <Step title="Install Git and Git LFS">
+    Install [Git](https://git-scm.com/) for your platform, then install [Git LFS](https://git-lfs.com/) and run the one-time install command:
+
+    ```bash
+    git lfs install
+    ```
+
+    This registers the LFS hooks globally. You only run it once per machine.
+  </Step>
+
+  <Step title="Clone the repository and pull LFS objects">
+    ```bash
+    git clone https://github.com/ParsaUltimate/Set-3D-Game.git
+    cd Set-3D-Game
+    git lfs pull
+    ```
+
+    The `git lfs pull` step downloads all binary assets (textures, audio, etc.) that are tracked by LFS. Without it, those files will be small stub pointers instead of real data, and Unity will log import errors.
+  </Step>
+
+  <Step title="Open the project in Unity Hub">
+    In Unity Hub, click **Open → Add project from disk** and select the cloned folder. Unity will import all packages and compile the project. The first import takes a few minutes.
+
+    If Unity warns about a version mismatch, do **not** proceed — install the exact 2022.3 LTS version listed in the project's `ProjectVersion.txt` file (`ProjectSettings/ProjectVersion.txt`).
+  </Step>
+
+  <Step title="Load the Bootstrap scene and press Play">
+    Open `Assets/_Project/Scenes/Bootstrap.unity` and press **Play**. Single-player and Pass & Play modes are fully local — they work without a Nakama server. You should see the main menu load.
+
+    If you see compile errors instead, check the [Common mistakes](#common-mistakes) section below.
+  </Step>
+
+  <Step title="(Optional) Run Nakama for multiplayer development">
+    If you're working on Infrastructure layer features (online matchmaking, leaderboards, cloud save), you need a local Nakama server:
+
+    ```bash
+    docker run --name nakama \
+      -p 7350:7350 \
+      -p 7351:7351 \
+      heroiclabs/nakama:latest
+    ```
+
+    Then configure the server address in `Assets/_Project/Data/nakama_config.json`. Leave this step out entirely if you're working on Domain or Application logic.
+  </Step>
+</Steps>
+
+<Tip>
+  **Domain and Application layer work requires no Unity runtime and no Nakama.** You can write and run unit tests for `SetValidator`, `Board`, `Deck`, and `GameSession` entirely through Unity's EditMode test runner — or even from a plain .NET test project. If Nakama isn't running, simply ignore multiplayer-related test failures.
+</Tip>
+
+---
+
+## Common mistakes
+
+<Warning>
+  **Common setup mistakes to avoid:**
+
+  - **Forgetting `git lfs pull`** — Unity will log import errors for every texture and audio file tracked by LFS. Always run `git lfs pull` immediately after cloning or switching branches.
+  - **Using the wrong Unity version** — even a minor patch mismatch (e.g., 2022.3.10 vs 2022.3.45) can cause project upgrade dialogs that corrupt local settings. Match the version in `ProjectSettings/ProjectVersion.txt` exactly.
+  - **Trying to test multiplayer without Nakama running** — online match features will time out silently. Single-player works fully offline; don't block your work on Nakama being available.
+  - **Adding the Android Build Support module after the fact** — if you installed Unity 2022.3 LTS without Android Build Support, add it through Unity Hub's **Installs → Add Modules** before opening the project.
+</Warning>
+
+---
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Repo Tour" icon="folder-tree" href="/onboarding/repo-tour">
+    A guided walkthrough of every folder and assembly in the project.
+  </Card>
+  <Card title="First Tasks" icon="list-check" href="/onboarding/first-tasks">
+    Concrete starter work in the Domain layer — no Unity runtime required.
+  </Card>
+  <Card title="Architecture Overview" icon="layer-group" href="/architecture/overview">
+    The four-layer Clean Architecture model and how the pieces fit together.
+  </Card>
+  <Card title="Engineering Standards" icon="shield-check" href="/standards/conventions">
+    Naming conventions, formatting rules, and the PR checklist.
+  </Card>
+</CardGroup>

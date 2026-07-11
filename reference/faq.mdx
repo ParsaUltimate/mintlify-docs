@@ -1,0 +1,356 @@
+---
+title: "FAQ and Troubleshooting for SET: 3D Edition Contributors"
+sidebarTitle: "FAQ"
+description: "Answers to common contributor questions about project setup, architecture decisions, game rules, multiplayer design, and scope boundaries."
+---
+
+This FAQ collects the questions most likely to arise when you first read the design documents or start contributing code. Each answer links to the authoritative source so you can read further without hunting for it yourself. If your question isn't here, check the [Glossary](/reference/glossary) first — many conceptual questions are answered by understanding the exact term.
+
+---
+
+## Getting Started
+
+<AccordionGroup>
+  <Accordion title="Do I need Nakama running to work on the project?" icon="server">
+    **No — most development does not require a running Nakama instance.**
+
+    | Work area | Nakama needed? |
+    |-----------|---------------|
+    | Domain layer (game rules, SetValidator) | ❌ — pure C#, no Unity |
+    | Application layer (GameSession, commands) | ❌ — no Unity or Nakama |
+    | Single Player and Pass & Play modes | ❌ — fully local |
+    | Online Multiplayer features | ✅ — requires Nakama |
+    | Leaderboards, cloud save, IAP | ✅ — requires Nakama |
+
+    For Domain and Application work, you only need a .NET test runner (Unity's Edit Mode test runner, or a plain `dotnet test` setup). Nakama only becomes relevant when you reach the Infrastructure layer's multiplayer implementation.
+
+    See [Multiplayer: Authority Model](/multiplayer/authority-model) for how the client and server are separated.
+  </Accordion>
+
+  <Accordion title="Why Unity 2022 LTS and not 2023 or Unity 6?" icon="unity">
+    **Stability and dependency compatibility.**
+
+    Unity 2022 LTS was chosen for three reasons at project kick-off:
+
+    1. **Long support window** — LTS releases receive bug-fix patches for two years, which matters for a project with a multi-phase roadmap.
+    2. **Known compatibility** — the Nakama .NET SDK and the R3 reactive library were both verified against Unity 2022 LTS. Newer engine versions had unresolved compatibility questions at the time the decision was made.
+    3. **Fewer surprises** — LTS releases are more stable than feature releases. A card game does not benefit from bleeding-edge rendering features, so there is no upside to accepting an unstable engine.
+
+    Upgrading to a newer Unity version is treated as a **change request** — it requires review by the Tech Lead before any branch work begins.
+  </Accordion>
+
+  <Accordion title="Can I use ECS/DOTS instead of OOP for game logic?" icon="diagram-cells">
+    **No — this decision is final for v1.0.**
+
+    The project uses **Compositional OOP** with Clean Architecture. This choice was made deliberately and is documented as a hard boundary. The reasons:
+
+    - **Scale:** The game has at most 21 interactive cards on screen. ECS is designed to process tens of thousands of entities per frame. The threshold where ECS outperforms OOP is never reached here.
+    - **Testability:** OOP domain objects are straightforward to unit-test with a standard test runner. ECS requires specific Unity package versions and the ECS test framework, which significantly increases test-environment complexity.
+    - **Architecture fit:** Clean Architecture with constructor injection and interfaces is incompatible with ECS's data-oriented component model. Mixing them would undermine both patterns.
+
+    If you believe ECS offers a meaningful advantage in a specific subsystem, raise a formal Change Request for the Tech Lead's review.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Architecture Questions
+
+<AccordionGroup>
+  <Accordion title="Why can't I add a UnityEngine reference to the Domain project?" icon="ban">
+    **Because Domain code must run in any C# environment, not just Unity.**
+
+    The Domain layer — `Card`, `SetValidator`, `Match`, `GameRules`, and all the rest — contains the rules of the game. These rules need to run:
+
+    - In Unity on Android (the game client).
+    - In unit tests on a developer's machine, with no Unity Editor open.
+    - Potentially server-side in the Nakama TypeScript match handler.
+
+    If `UnityEngine` is referenced in Domain, tests break the moment they're run outside the Unity Editor, server-side reuse becomes impossible, and the layer boundary is compromised. Unity is a **deployment target** for the rules engine, not a dependency of it.
+
+    If you need a Unity type in logic that belongs in Domain, the fix is to abstract it — pass a value (e.g., a `float` for time) rather than a Unity object (e.g., `Time.deltaTime` read from a MonoBehaviour above). See [Architecture: Layers](/architecture/layers) for the full dependency diagram.
+  </Accordion>
+
+  <Accordion title="Why does Presentation not reference Infrastructure?" icon="layer-group">
+    **To enforce the dependency rule and keep implementations swappable.**
+
+    Presentation depends only on Application **interfaces** — `IMatchOrchestrator`, `IGameStateProvider`, `IMultiplayerService`, `ILeaderboardService`, etc. It has no knowledge of the concrete classes that implement them.
+
+    VContainer, configured in the **Bootstrap scene**, binds each interface to its concrete Infrastructure implementation at runtime:
+
+    ```csharp
+    // Bootstrap scene LifetimeScope — wires everything together
+    builder.Register<NakamaMultiplayerService>(Lifetime.Singleton)
+           .As<IMultiplayerService>();
+    ```
+
+    This means you can swap `NakamaMultiplayerService` for a `LocalMultiplayerStub` in tests or for a future alternative backend — without changing a single line of Presentation code. The moment Presentation references a concrete Infrastructure type directly, that flexibility is lost.
+  </Accordion>
+
+  <Accordion title="Why use R3 instead of C# events or ScriptableObject channels?" icon="broadcast-tower">
+    **Because R3 provides operators that would require significant custom code otherwise, and it unifies all three game modes.**
+
+    Plain C# events can do pub/sub, but they have no composition operators. To throttle UI updates, deduplicate identical state changes, or buffer events for animations, you'd write custom queues and timers. R3 provides `ThrottleFirst`, `DistinctUntilChanged`, `Buffer`, and `ObserveOnMainThread` out of the box.
+
+    ScriptableObject channels work well for simple decoupling but become awkward for typed event streams with multiple subscribers, especially across scenes.
+
+    The more important reason: **all three game modes (Single Player, Online Multiplayer, Pass & Play) feed the same `IGameStateProvider` reactive pipeline**. The ViewModel and View code is identical regardless of which mode is running. There are no `if (mode == Multiplayer)` branches in Presentation code — the mode difference lives entirely in the Infrastructure layer below.
+
+    See [Architecture: Reactive UI](/architecture/reactive-ui) for a walkthrough.
+  </Accordion>
+
+  <Accordion title="Why VContainer and not Zenject?" icon="syringe">
+    **VContainer was selected for its simpler API and lower runtime overhead.**
+
+    Both VContainer and Zenject are solid constructor-injection DI containers for Unity. The reasons VContainer was chosen:
+
+    - **Less garbage:** VContainer generates fewer allocations per resolve, which matters for a 60 FPS mobile target.
+    - **Simpler registration API:** VContainer's `LifetimeScope` is a regular `MonoBehaviour`; the registration syntax is concise and explicit.
+    - **No magic:** VContainer has no auto-scanning or attribute-based injection by default — everything is registered intentionally, making it easier to audit what the container knows about.
+
+    Zenject would also work. If you're familiar with Zenject and confused by VContainer's API, see [Architecture: DI with VContainer](/architecture/di-vcontainer) for a direct mapping.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Game Rules Questions
+
+<AccordionGroup>
+  <Accordion title="What happens if the board reaches 21 cards and there's still no Set?" icon="cards-blank">
+    **The game ends immediately, even if cards remain in the deck.**
+
+    This matches the official SET card game rules. Once the board reaches 21 cards (the maximum), no further expansion is possible. If `AnySetExists()` returns `false` at that point, the server broadcasts `MatchEndedEvent` and transitions `MatchState` to `MatchEnd`.
+
+    This is documented as an edge case in the Game Rules document (§14): *"The game ends even if the deck still has cards."*
+
+    In practice this is rare — statistically, 21-card boards with no Set are extremely unlikely — but the code must handle it correctly.
+  </Accordion>
+
+  <Accordion title="What is the difference between Refill and Expansion?" icon="arrows-left-right">
+    These two operations are frequently confused. The key distinction:
+
+    | Operation | What it does | When it happens | Board slot count |
+    |-----------|-------------|-----------------|-----------------|
+    | **Refill** | Draws cards from the Deck into the **existing empty slots** left by a claimed Set | After a valid Set is removed | Unchanged |
+    | **Expansion** | Adds **3 new slots** to the Board and deals into them | When `AnySetExists()` returns `false` after any board change | Grows by 3 |
+
+    After a valid claim: the three slots become empty → `Refill` is called → cards from the Deck fill those three slots → `AnySetExists()` is called. If still no Set: `Expansion` adds three new slots and deals into them → `AnySetExists()` is called again.
+
+    If the Deck is empty during Refill, slots simply remain empty. If the Deck has fewer than 3 cards during a needed Expansion, the game ends — no partial deal.
+  </Accordion>
+
+  <Accordion title="Can a player select the same card twice?" icon="hand-pointer">
+    **No — selecting an already-selected card deselects it.**
+
+    Tapping a selected card dispatches a `DeselectCardCommand`. The UI must immediately update the card's visual state to unselected. The domain enforces that `_selectedCards` never contains duplicate entries.
+
+    This is consistent with the physical card game, where you simply pick up or put down a card. The selection mechanic is atomic per tap.
+  </Accordion>
+
+  <Accordion title="Does score count go below zero with Point penalties?" icon="minus">
+    **No — score has a floor of 0.**
+
+    This is an invariant enforced by the `Player` entity: `Player.ApplyPenalty()` deducts 1 point in `Point` mode but clamps the result at 0. A player with a score of 0 who makes an invalid claim in `Point` mode stays at 0.
+
+    This invariant is listed in the Domain Model document: *"A player's Score and Penalties cannot be negative."*
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Multiplayer Questions
+
+<AccordionGroup>
+  <Accordion title="Why doesn't the client validate Sets in multiplayer?" icon="shield-check">
+    **Server authority eliminates cheating and resolves simultaneous claims fairly.**
+
+    If the client validated Sets and reported results to the server, two problems arise:
+
+    1. **Cheating:** A modified client could mark any three cards as a valid Set and claim fraudulently. There is no reliable way to detect this from the client side alone.
+    2. **Simultaneous claims:** If two players claim the same Set at roughly the same time, both clients would "succeed" locally, resulting in diverged game state. The server is the only single source of truth that can resolve this deterministically.
+
+    The latency cost is one round-trip: claim sent → server validates and updates state → state broadcast arrives back. For a card game, worst-case latency is 50 ms (one Nakama tick) plus network RTT. This is imperceptible for a game where card selection takes hundreds of milliseconds. The playable latency ceiling is 250 ms round-trip.
+
+    See [Multiplayer: Authority Model](/multiplayer/authority-model) for the full design.
+  </Accordion>
+
+  <Accordion title="What is the Nakama tick rate and why 20 Hz?" icon="clock">
+    **20 Hz (one tick every 50 ms) was chosen to balance responsiveness against batching efficiency.**
+
+    At 20 Hz:
+    - A claim submitted just after a tick starts is processed within 50 ms — fast enough to feel responsive in a card game where selecting three cards takes at least a second.
+    - Multiple inputs that arrive within the same tick are batched and processed together, which reduces server-side processing overhead compared to processing every message instantly.
+    - The tick rate is appropriate for a **turn-based-feel** real-time game. Contrast this with a first-person shooter where 64–128 Hz is necessary to resolve sub-frame collisions.
+
+    The tick constant is defined in the Nakama match handler. If it needs to change, it must be updated on both the server and in the client's timing assumptions.
+  </Accordion>
+
+  <Accordion title="What happens if two players claim the same Set at the exact same millisecond?" icon="bolt">
+    **The server uses a deterministic tiebreaker: the player with the lower session ID wins.**
+
+    Resolution order:
+    1. Claims arriving in the same server tick are ordered by their message timestamp.
+    2. If timestamps are identical (true simultaneous arrival), the player with the **lower session ID** wins.
+    3. The winning claim is validated and processed. If the Set is valid, the cards are removed.
+    4. The losing claim is then evaluated. Because the cards are already gone, the claim is invalid — but it counts as an **invalid attempt** only if the `PenaltyMode` is not `None`.
+
+    This rule is documented, deterministic, and cannot be gamed by the client (the client does not choose its session ID). It is broadcast to all players as part of the state update so every client sees the same resolution.
+  </Accordion>
+
+  <Accordion title="What happens when a player disconnects mid-match?" icon="plug-circle-xmark">
+    **The disconnected player is given a 30-second reconnect window.**
+
+    - During the window: the match continues for the remaining connected players. The disconnected player's cards-in-selection are released back to unselected state.
+    - If the player reconnects within 30 seconds: they receive the current full `GameStateSnapshot` and resume normally.
+    - If the window expires: the player is considered to have **forfeited**. Their score is retained in the final results, but they cannot win. If all opponents disconnect, the last connected player wins by default.
+
+    Timer pausing during disconnects applies only in Single Player mode. In Online Multiplayer, the global timer continues even if one player disconnects.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Scope & v1.0 Questions
+
+<AccordionGroup>
+  <Accordion title="Is iOS planned for v1.0?" icon="mobile">
+    **No — Android only for v1.0.**
+
+    The v1.0 release targets **Google Play Store**, minimum Android API level 26 (Android 8.0). Google Play Games Services is the only social platform integration in scope.
+
+    iOS is explicitly listed as a future roadmap item in the Hard Boundaries document (§3.1). Adding iOS support before v1.0 requires a formal Change Request reviewed by the Product Owner and Tech Lead — it is not a decision that can be made unilaterally on a feature branch.
+  </Accordion>
+
+  <Accordion title="Is voice chat in scope?" icon="microphone">
+    **No — voice chat is out of scope for v1.0.**
+
+    The Hard Boundaries document (§3.1) explicitly excludes voice chat integration. The in-game social feature for online matches is a **fixed set of 5–8 quick emote icons** — no custom text chat and no voice.
+
+    If you want to add voice chat, raise a formal Change Request. Be aware that voice chat introduces significant complexity: platform permission handling, network infrastructure, moderation concerns, and accessibility implications.
+  </Accordion>
+
+  <Accordion title="Can I add a new game mode that isn't in the GDD?" icon="gamepad">
+    **Not without a formal Change Request.**
+
+    The seven game modes in scope for v1.0 are:
+    1. Single Player vs AI (Easy / Medium / Hard / Expert + rubber-band assist)
+    2. Online Multiplayer — Quick Match, Ranked, Private Room
+    3. Tournament Mode (server-scheduled bracket, up to 8 players)
+    4. Pass & Play (2–8 players, single device)
+    5. Practice Mode
+    6. Campaign Mode (progressive AI difficulty)
+    7. Daily Challenge (fixed seed, global leaderboard)
+
+    Any mode not in this list is out of scope. The Hard Boundaries document supersedes informal requests and brainstorming notes. A Change Request must be reviewed by the Product Owner and Tech Lead and explicitly accepted before any engineering work begins (§11 of the Hard Boundaries document).
+  </Accordion>
+
+  <Accordion title="Why is monetisation cosmetic-only? Can I add a gameplay booster IAP?" icon="shop">
+    **No — pay-to-win is an explicit ethical and design boundary.**
+
+    The Hard Boundaries document (§8) states this unambiguously:
+
+    > *"Only cosmetic items (table skins, card backs, symbol packs) may be sold. No temporary boosts, extra hints for purchase, or consumable advantages."*
+
+    Additionally:
+
+    - **No loot boxes or random-chance mechanics** — all purchases are direct "see it, buy it."
+    - **No gambling** of any kind, including tournament entry fees with prizes.
+    - **Rewarded ads** are allowed for extra hints in Single Player only; no forced interstitials during gameplay.
+
+    This constraint exists because SET is a pure-skill game and competitive integrity is a core value. Any IAP that changes a player's competitive capability would undermine trust in ranked play.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Unity won't compile — missing assembly reference error" icon="triangle-exclamation">
+    **You have added a reference that violates layer boundaries. The error is intentional.**
+
+    Unity's `asmdef` system enforces that lower layers cannot reference higher layers. If you're seeing a missing reference error, it means one of:
+
+    1. You added a type from a higher layer to a lower-layer class (e.g., a `MonoBehaviour` in the Domain project).
+    2. You added a dependency to an `asmdef` that is not permitted by the architecture.
+
+    **The fix is never to add the reference — it is to move the code.** Ask yourself: does this logic belong in the layer I'm writing it in? If Domain code needs a float for timing, pass it as a parameter. If Application code needs to update the UI, emit a domain event and let Presentation subscribe.
+
+    See [Architecture: Layers](/architecture/layers) and [Architecture: Asmdefs](/architecture/asmdefs) for the full layer boundary rules.
+  </Accordion>
+
+  <Accordion title="My unit test fails with 'UnityEngine.dll not found'" icon="flask">
+    **Domain and Application tests must run as Edit Mode tests inside Unity's test runner.**
+
+    Domain and Application code has no `UnityEngine` dependency — but Unity's **Edit Mode Test Runner** sets up the right environment and handles assembly resolution correctly. Tests in the wrong runner context will fail to resolve assemblies.
+
+    How to check:
+    1. Open **Window → General → Test Runner** in the Unity Editor.
+    2. Select the **Edit Mode** tab.
+    3. Ensure your test file is in an assembly with `asmdef` references pointing to `SET.Tests.EditMode` (or your project's equivalent test assembly), **not** Play Mode.
+
+    If you're running tests via `dotnet test` outside Unity, Domain-only tests can work if the test project references only the Domain assembly and has no Unity types. As soon as Application-layer code (which may use Unity types for coroutines or lifecycle) is included, you need the Edit Mode runner.
+  </Accordion>
+
+  <Accordion title="Nakama connection fails in the Editor" icon="plug">
+    **Check that Docker is running and the Nakama container is up.**
+
+    Step-by-step:
+
+    ```bash
+    # 1. Verify Docker is running
+    docker ps
+
+    # 2. Look for the nakama container in the list
+    # You should see something like: heroiclabs/nakama   Up X minutes   0.0.0.0:7350->7350/tcp
+    ```
+
+    If the container is not listed, start it with your project's `docker-compose.yml`:
+
+    ```bash
+    docker-compose up -d
+    ```
+
+    Then verify the server URL in `Assets/_Project/Data/nakama_config.json` matches your local instance:
+
+    ```json
+    { "host": "localhost", "port": 7350, "scheme": "http" }
+    ```
+
+    Default local Nakama runs on `localhost:7350`. If you changed the port in `docker-compose.yml`, update the config to match. If connection still fails, check that your firewall is not blocking port 7350.
+  </Accordion>
+
+  <Accordion title="The board shows no Set, but AnySetExists() returns true" icon="magnifying-glass">
+    **The board display is stale — the View is not receiving the latest `GameStateSnapshot`.**
+
+    This mismatch means the domain is ahead of what the UI is showing. Work through this checklist:
+
+    1. **Is `GameStateSnapshot` being emitted after the board mutation?** Set a breakpoint or log in `GameSession` after the `Refill` or `Expansion` step completes and confirm `StateStream.OnNext()` is called.
+
+    2. **Is the View subscribed to the correct `ReactiveProperty`?** Check the ViewModel's board property — it should be updated inside the `StateStream` subscription, not cached from an earlier snapshot.
+
+    3. **Did `Refill` or `Expansion` complete before `AnySetExists` was called?** The call order in `GameSession` matters: board mutation → `Refill`/`Expansion` → emit snapshot → `AnySetExists` check. If the snapshot is emitted *before* `Refill` finishes, the UI will show the board in an intermediate state.
+
+    4. **Is the `CompositeDisposable` disposed too early?** If the ViewModel's disposable is collected before the match ends, the View silently stops receiving updates.
+
+    See [Core Gameplay: Board and Dealing](/core-gameplay/board-and-dealing) for the correct event ordering.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Glossary" icon="book" href="/reference/glossary">
+    Precise definitions for every term used in this FAQ and across the codebase.
+  </Card>
+  <Card title="Data Formats" icon="file-code" href="/reference/data-formats">
+    JSON schemas for config files, save data, and network messages.
+  </Card>
+  <Card title="Architecture: Layers" icon="layer-group" href="/architecture/layers">
+    The full dependency diagram and what belongs in each layer.
+  </Card>
+  <Card title="Multiplayer: Authority Model" icon="server" href="/multiplayer/authority-model">
+    Why the server validates all Set claims and how simultaneous claims are resolved.
+  </Card>
+</CardGroup>

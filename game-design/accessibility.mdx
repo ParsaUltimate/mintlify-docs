@@ -1,0 +1,146 @@
+---
+title: "Accessibility Features and Inclusive Design Goals"
+sidebarTitle: "Accessibility"
+description: "Planned accessibility features for SET: 3D Edition — colorblind mode, shape assist, adjustable card sizes, text-to-speech, haptics, and responsive device layout."
+---
+
+Color is one of the four core attributes in the SET card game. Without accessibility support, a player with red-green colorblindness cannot reliably distinguish Red, Green, and Purple cards — meaning roughly 8 % of male players and 0.5 % of female players are effectively locked out of the game by default. Addressing this is not optional polish; it is a **v1.0 requirement** that appears explicitly in the Hard Boundaries document. This page documents all planned accessibility features, the device responsiveness rules from the UI spec, and the layer-level guidance for where these features are implemented.
+
+<Warning>
+**Pre-production — all features on this page are Planned.** Accessibility features are in-scope for v1.0 and must ship at launch. They have not yet been implemented. See the [Hard Boundaries](/onboarding/prerequisites) document for the full in-scope list.
+</Warning>
+
+## Why this page exists
+
+Accessibility features in SET: 3D Edition interact with both the **Presentation layer** (how cards are rendered) and the **Settings screen** (how players toggle features). They do **not** touch the Domain layer — `SetValidator`, `Card`, and `Match` are attribute-agnostic; they work with enum values, not with visual representations. Keeping that separation clear prevents accessibility features from accidentally coupling into game logic.
+
+<Tip>
+All accessibility settings are implemented in the Presentation layer and the Settings screen. If you find yourself writing accessibility logic inside `SetValidator`, `GameSession`, or any Domain class, you are in the wrong layer.
+</Tip>
+
+---
+
+## Planned accessibility features
+
+All four features below are **in-scope for v1.0** per the Hard Boundaries document. They are toggled independently on the Settings screen under the **Accessibility** section.
+
+| Feature | What it does | Toggle location |
+|---|---|---|
+| **Colorblind Mode** | Applies distinct pattern or texture overlays to Red, Green, and Purple cards — patterns are readable even in grayscale. Hue alone is never the only distinguishing signal. | Settings → Accessibility → Colorblind Mode (On/Off) |
+| **Shape Assist** | Overlays a label or icon on each card that reinforces the shape type (Diamond, Squiggle, Oval) with additional visual cues — useful for players who find the 3D shapes ambiguous at small sizes. | Settings → Accessibility → Shape Assist (On/Off) |
+| **Adjustable Card Size** | Three preset sizes — Small (S), Medium (M), and Large (L) — scale the 3D card prefabs and grid layout. Useful for low-vision players and for tablets vs phones. | Settings → Accessibility → Card Size (S / M / L) |
+| **Text-to-Speech** | When enabled, tapping a card reads its attributes aloud: *"Two red striped diamonds."* Reads Number, Color, Shading, then Shape. Uses the Android TalkBack-compatible speech synthesis API. Toggle also silences callouts for players who find them distracting. | Settings → Accessibility → Text-to-Speech (On/Off) |
+| **High-Contrast UI** | Increases contrast on all non-card UI elements (HUD text, buttons, overlays). Specified in the Settings screen UI layout. | Settings → Accessibility → High-Contrast UI (On/Off) |
+
+<Note>
+Colorblind Mode must remain effective with **any equipped cosmetic symbol pack**. The cosmetic store is explicitly prohibited from shipping symbol sets that undermine accessibility. This is enforced as a content policy, not a code gate.
+</Note>
+
+---
+
+## Haptic feedback <span style={{color: "#888", fontSize: "0.85em"}}>(Planned)</span>
+
+Android haptic patterns are triggered by the `HapticsService` (Infrastructure layer) in response to match events. Haptics is a separate toggle (Settings → Gameplay → Haptics On/Off) and is independent of accessibility settings.
+
+| Event | Haptic pattern |
+|---|---|
+| Card selected | Short, light tap |
+| Valid Set confirmed | Double pulse (satisfying) |
+| Invalid Set | Single buzz (brief, not punishing) |
+| New cards dealt | Soft tick per card |
+
+---
+
+## In-match settings access <span style={{color: "#888", fontSize: "0.85em"}}>(Planned)</span>
+
+Accessibility settings are reachable **without leaving the match** via the Pause Menu → Settings. In Single Player and Pass & Play, the match pauses while Settings is open. In Online Multiplayer, the match continues on the server (pausing is not allowed mid-match), but Settings is still accessible — a "Match still in progress" banner is shown.
+
+---
+
+## Device responsiveness
+
+The UI Layout specification defines how the game adapts across Android device classes. These are not optional — they are part of the v1.0 UI spec.
+
+| Device class | Layout adaptation |
+|---|---|
+| **Small phones (< 6")** | Card grid spacing compressed by 15%; HUD text scaled down; Pass & Play claim zone buttons enlarged for thumb reach |
+| **Large phones / phablets** | Default layout as specified |
+| **Tablets (7"+)** | Larger card prefabs, more breathing room in margins; HUD may show additional stat details (match timeline) |
+| **Notch / punch-hole displays** | 3–5 % safe-zone padding enforced on all top-bar elements |
+| **Foldables** | Out of scope for v1.0 — listed as a stretch goal only |
+
+### Orientation support
+
+| Context | Orientation |
+|---|---|
+| In-match Game Board | **Landscape forced** — auto-rotates on match entry regardless of current menu orientation |
+| All menus (Main Menu, Mode Select, Settings, etc.) | **Portrait + landscape both supported** |
+
+---
+
+## Out of scope for v1.0
+
+The following accessibility-adjacent features are **explicitly deferred** to a post-launch release:
+
+<Accordion title="Out-of-scope accessibility items — click to expand">
+- **Localization / multi-language support** — All text is English-only at launch. String keys are externalized in a localization file to make future translation possible, but no non-English strings will be bundled in v1.0.
+- **Foldable device reflow** — The card grid does not reflow on Android foldables at launch. Cards maintain the 4-column layout regardless of fold state.
+- **Per-player timer accessibility** — No per-player clocks in v1.0 (only global match timer).
+- **Custom sound packs / alternate voice callouts** — The text-to-speech feature uses the system TTS engine; custom recorded callouts are not in scope.
+- **Motor-accessibility gestures** — Switch-access or single-switch navigation is not in the current scope. Standard Android TalkBack support is the target.
+</Accordion>
+
+---
+
+## Implementation guidance for engineers
+
+<Steps>
+  <Step title="Presentation layer only">
+    All accessibility features operate on the visual representation of cards (`CardRenderer`, `CardView3D`) and the UI layer (ViewModels, Views). The `Card` domain object is an enum tuple — it has no concept of "what it looks like." Do not pass accessibility flags into Domain classes.
+  </Step>
+  <Step title="Settings screen wires to ReactiveProperty">
+    Each accessibility toggle in the Settings screen updates a `ReactiveProperty<bool>` (or `ReactiveProperty<CardSizePreset>`) held in an `AccessibilitySettings` model. The `CardRenderer` subscribes to these properties and re-renders cards when they change. No manual "refresh all cards" call is needed.
+  </Step>
+  <Step title="Colorblind overlay on card material">
+    Colorblind Mode swaps the card's color-encoded material for a pattern-encoded variant at the `CardRenderer` level. The pattern must remain legible with any equipped cosmetic symbol pack — validate this in the content pipeline, not at runtime.
+  </Step>
+  <Step title="TTS integration via Android API">
+    Text-to-speech reads card attributes when the player taps a card and TTS is enabled. The speech string is constructed from the `Card` value object's enum fields: `$"{card.Number} {card.Color} {card.Shading} {card.Shape}"`. This string is assembled in the Presentation layer (a presenter or ViewModel), never in Domain code.
+  </Step>
+  <Step title="Accessibility audit before launch">
+    Run the Android TalkBack screen-reader against the full game flow. Run a color-blindness simulator against the card grid with Colorblind Mode both on and off. Both audits are required QA gates before v1.0 release per the Hard Boundaries document.
+  </Step>
+</Steps>
+
+---
+
+## Common mistakes
+
+<Warning>
+**Common mistakes with accessibility features:**
+
+1. **Adding colorblind logic to `Card` or `SetValidator`** — These are pure domain objects. They deal with enum values, not visual presentation. Colorblind mode belongs entirely in `CardRenderer` and the material system.
+
+2. **Making a cosmetic symbol pack that breaks Colorblind Mode** — The store content pipeline must validate that every symbol pack maintains distinct per-color patterns when Colorblind Mode is active. This is a content policy check, not something to enforce in code at runtime.
+
+3. **Forgetting to keep accessibility settings accessible in-match** — Players should not have to quit a match to toggle card size or colorblind mode. The Settings screen must be reachable from the Pause Menu.
+
+4. **Treating TTS as a "nice to have"** — Text-to-speech is listed as a v1.0 in-scope requirement in the Hard Boundaries document. It is not optional and must pass an accessibility audit before launch.
+</Warning>
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Concept" icon="lightbulb" href="/game-design/concept">
+    Design pillars — Accessibility is one of the four core pillars driving every product decision.
+  </Card>
+  <Card title="Game Modes" icon="gamepad" href="/game-design/modes">
+    How accessibility settings (card size, colorblind mode) apply across all three modes.
+  </Card>
+  <Card title="UI Flow" icon="layout" href="/architecture/reactive-ui">
+    Device responsiveness tables, Settings screen component spec, and the full screen-by-screen UI breakdown.
+  </Card>
+  <Card title="Game Modes" icon="shield" href="/game-design/modes">
+    The complete in-scope and out-of-scope lists that define exactly what must ship for v1.0.
+  </Card>
+</CardGroup>

@@ -1,0 +1,375 @@
+---
+title: "Testing Standards: Unit Tests, Integration, and Coverage Goals"
+sidebarTitle: "Testing"
+description: "Testing standards for SET: 3D Edition covering unit tests with NSubstitute, PlayMode integration tests, naming conventions, and coverage targets."
+---
+
+SET has one property that makes testing unusually important: the rules are perfectly deterministic. Given the same deck seed and the same sequence of player inputs, every mode — Single Player, Pass & Play, and Online Multiplayer — must produce the exact same outcome. A bug in `SetValidator` or a missed state transition in `GameSession` does not corrupt one mode; it corrupts all three simultaneously. This is why Domain and Application code must be tested to 100% coverage before any UI or network work builds on top of it.
+
+<Warning>
+  All unit tests must pass in CI before a PR can merge. A single failing test blocks the entire team. Never push a test in a commented-out or `[Ignore]`-attributed state without a linked ticket and a deadline for re-enabling it.
+</Warning>
+
+---
+
+## Test Categories
+
+| Category | Assembly | Tools | What It Covers |
+|----------|----------|-------|----------------|
+| **Unit (EditMode)** | `SET.Tests.EditMode` | Unity Test Framework, NSubstitute | Domain + Application: `SetValidator`, `Deck`, `Board`, `GameSession` state machine, penalty logic, AI behaviour |
+| **Integration (PlayMode)** | `SET.Tests.PlayMode` | Unity Test Framework | ViewModels + Views, input handling, UI state transitions, full match loop with live Unity scene |
+
+EditMode tests run without a Unity process (no `MonoBehaviour` lifecycle). They execute fast — a full Domain + Application suite should complete in under 5 seconds. PlayMode tests spin up a Unity scene and are slower; reserve them for integration concerns that genuinely require a running scene.
+
+---
+
+## Writing Unit Tests
+
+### Basic SetValidator Test
+
+This is the simplest form: no mocks needed because `SetValidator` is a pure function.
+
+```csharp
+[TestFixture]
+public sealed class SetValidatorTests
+{
+    private SetValidator _validator;
+
+    [SetUp]
+    public void SetUp()
+    {
+        _validator = new SetValidator();
+    }
+
+    [Test]
+    public void Validate_AllAttributesDifferent_ReturnsValid()
+    {
+        // Arrange
+        var cards = new[]
+        {
+            CardFactory.Create(Number.One,   Shape.Diamond,  Color.Red,    Shading.Solid),
+            CardFactory.Create(Number.Two,   Shape.Squiggle, Color.Green,  Shading.Striped),
+            CardFactory.Create(Number.Three, Shape.Oval,     Color.Purple, Shading.Open),
+        };
+
+        // Act
+        SetResult result = _validator.Validate(cards);
+
+        // Assert
+        Assert.IsTrue(result.IsValid);
+        Assert.IsNull(result.Reason);
+    }
+
+    [Test]
+    public void Validate_TwoCardsSameNumberOneDifferent_ReturnsInvalid()
+    {
+        // Arrange
+        var cards = new[]
+        {
+            CardFactory.Create(Number.One,  Shape.Diamond,  Color.Red,    Shading.Solid),
+            CardFactory.Create(Number.One,  Shape.Squiggle, Color.Green,  Shading.Striped),
+            CardFactory.Create(Number.Two,  Shape.Oval,     Color.Purple, Shading.Open),
+        };
+
+        // Act
+        SetResult result = _validator.Validate(cards);
+
+        // Assert
+        Assert.IsFalse(result.IsValid);
+        Assert.AreEqual(InvalidReason.Number, result.Reason);
+    }
+}
+```
+
+### Testing GameSession with NSubstitute Mocks
+
+When testing `GameSession`, inject mocked dependencies so your test controls exactly what `ISetValidator` and `IAIScanner` return.
+
+```csharp
+[TestFixture]
+public sealed class GameSessionTests
+{
+    private ISetValidator _mockValidator;
+    private IAIScanner _mockScanner;
+    private GameSession _session;
+
+    [SetUp]
+    public void SetUp()
+    {
+        _mockValidator = Substitute.For<ISetValidator>();
+        _mockScanner   = Substitute.For<IAIScanner>();
+        _session       = new GameSession(_mockValidator, _mockScanner);
+    }
+
+    [Test]
+    public void HandleCommand_ClaimValidSet_EmitsSetClaimedEvent()
+    {
+        // Arrange
+        _mockValidator
+            .Validate(Arg.Any<IReadOnlyList<Card>>())
+            .Returns(new SetResult(isValid: true, reason: null));
+
+        MatchEvent capturedEvent = null;
+        _session.EventStream.Subscribe(e => capturedEvent = e);
+
+        _session.StartMatch(GameRules.Default);
+        SelectThreeCards(_session, 0, 1, 2);
+
+        // Act
+        _session.HandleCommand(new ClaimSelectedCommand(PlayerId.Local));
+
+        // Assert
+        Assert.IsNotNull(capturedEvent);
+        Assert.IsInstanceOf<SetClaimedEvent>(capturedEvent);
+    }
+
+    [Test]
+    public void HandleCommand_ClaimInvalidSet_AppliesPointPenalty()
+    {
+        // Arrange
+        _mockValidator
+            .Validate(Arg.Any<IReadOnlyList<Card>>())
+            .Returns(new SetResult(isValid: false, reason: InvalidReason.Color));
+
+        var rules = new GameRules(penaltyMode: PenaltyMode.Point, pointPenalty: 1);
+        _session.StartMatch(rules);
+        SelectThreeCards(_session, 0, 1, 2);
+
+        // Act
+        _session.HandleCommand(new ClaimSelectedCommand(PlayerId.Local));
+        GameStateSnapshot snapshot = _session.CurrentSnapshot;
+
+        // Assert
+        Assert.AreEqual(-1, snapshot.Players[0].Score);
+    }
+
+    private static void SelectThreeCards(GameSession session, params int[] slots)
+    {
+        foreach (int slot in slots)
+        {
+            session.HandleCommand(new SelectCardCommand(slot));
+        }
+    }
+}
+```
+
+---
+
+## Naming Convention
+
+Every test method follows the three-part pattern:
+
+```
+MethodName_Scenario_ExpectedBehavior
+```
+
+| Part | Guidance |
+|------|---------|
+| **MethodName** | The method or behaviour under test |
+| **Scenario** | The specific input or condition |
+| **ExpectedBehavior** | The observable outcome |
+
+**Good names:**
+- `Validate_AllDifferent_ReturnsValid`
+- `Validate_MixedColor_ReturnsInvalidWithReason`
+- `ClaimSelected_InvalidSet_PointPenaltyApplied`
+- `AnySetExists_BoardWithNoValidSet_ReturnsFalse`
+- `HandleCommand_InWaitingForServerState_DiscardsClaim`
+
+**Bad names:**
+- `TestValidation` — what is being validated? what result?
+- `Test1` — meaningless
+- `WorksCorrectly` — every test should work correctly; this adds no information
+
+---
+
+## AAA Pattern
+
+Every test body must have three clearly separated sections. Use a blank line between each.
+
+```csharp
+[Test]
+public void FindAllSets_FullBoard_ReturnsAtLeastOneSet()
+{
+    // Arrange
+    var board = BoardFactory.CreateBoardWithKnownSet();
+    var validator = new SetValidator();
+
+    // Act
+    IReadOnlyList<SetTriple> sets = validator.FindAllSets(board.Cards);
+
+    // Assert
+    Assert.Greater(sets.Count, 0);
+}
+```
+
+Never mix act and assert into a single statement like `Assert.IsTrue(validator.FindAllSets(board).Count > 0)` — it obscures the intent and makes failures harder to diagnose.
+
+---
+
+## Coverage Targets
+
+| Layer | Target | Rationale |
+|-------|--------|-----------|
+| **Domain** | 100% of all logic branches | `SetValidator`, `Deck`, `Board` — a single uncovered branch is a potential live bug in all three game modes |
+| **Application** | 100% of state transitions and command handling | Every valid and invalid transition must be exercised |
+| **Infrastructure** | Happy-path integration tests | Edge cases belong at the unit level; integration tests verify the adapter wires up correctly |
+| **Presentation** | Key happy-path PlayMode tests | Animation timing and visual appearance are not testable automatically |
+
+<Info>
+  Coverage percentage is a floor, not a goal. 100% branch coverage on `SetValidator` with weak assertions is worthless. Write tests that would **catch a real bug** — wrong attribute check, off-by-one board expansion, missed penalty deduction.
+</Info>
+
+---
+
+## What to Test
+
+### SetValidator — Cover Every Combination
+
+```
+For each of the 4 attributes (Number, Shape, Color, Shading):
+  ✅ All-same (valid)
+  ✅ All-different (valid)
+  ❌ Two-same, one-different (invalid — name the violated attribute in the Reason)
+
+Mixed valid set:
+  ✅ Some attributes all-same, others all-different
+
+FindAllSets:
+  ✅ Board with 1 known Set returns that Set
+  ✅ Board with 0 Sets returns empty list
+  ✅ Board with multiple overlapping Sets returns all of them
+
+AnySetExists:
+  ✅ Returns true when at least one valid Set exists
+  ✅ Returns false on a board constructed to have no valid Set
+```
+
+### Board — Invariants
+
+```
+✅ Placing a card on an occupied slot throws ArgumentException (or returns a Result failure)
+✅ Board expands by 3 slots when AnySetExists() is false and deck has cards remaining
+✅ Board does not expand beyond MaxBoardSize (21)
+✅ Removing 3 cards from a claimed Set correctly vacates those slots
+```
+
+### GameSession — State Machine
+
+```
+For every valid transition:
+  ✅ Command is accepted and state advances correctly
+  ✅ Correct MatchEvent is emitted
+
+For every invalid transition:
+  ✅ Command is silently discarded
+  ✅ State does not change
+  ✅ No event emitted
+
+Penalty logic:
+  ✅ PenaltyMode.None — no score change on invalid claim
+  ✅ PenaltyMode.Point — configurable point deduction applied
+  ✅ PenaltyMode.Time — configurable time penalty applied
+
+End-game conditions:
+  ✅ Deck empty + no valid Set on board → MatchEnd event
+  ✅ Timer expires (timed mode) → MatchEnd event
+  ✅ All opponents disconnect (multiplayer) → MatchEnd event
+```
+
+### AI (deterministic with fixed seed)
+
+```
+✅ AI reaction time falls within configured min/max delay window over 100 rounds
+✅ AI miss rate matches configured value ± 5% over 1 000 rounds
+✅ AI cancels pending claim when board changes
+```
+
+---
+
+## What NOT to Test
+
+- **Auto-properties with no logic.** Testing that `card.Color == Color.Red` after `card = new Card(Color.Red)` proves nothing.
+- **Visual appearance.** Animation curves, particle counts, and shader parameters cannot be meaningfully asserted in code.
+- **Animation timing.** If an animation takes 0.3 s, don't write a test for "0.3 seconds elapsed." That couples your test suite to an art decision.
+- **Unity internals.** You don't need to verify that `Text.text = "5"` makes text appear on screen. Trust the engine.
+
+---
+
+## Injecting Time for Deterministic Tests
+
+`GameSession` timed mode relies on elapsed time. Never use `Time.deltaTime` directly in Domain or Application code — that is a Unity API. Instead, inject an `ITimeProvider` interface.
+
+```csharp
+// Application layer interface
+public interface ITimeProvider
+{
+    float ElapsedSeconds { get; }
+}
+
+// In tests — fully controlled
+public sealed class FakeTimeProvider : ITimeProvider
+{
+    public float ElapsedSeconds { get; set; }
+}
+
+[Test]
+public void GameSession_TimerExpires_EmitsMatchEndEvent()
+{
+    var time = new FakeTimeProvider { ElapsedSeconds = 0f };
+    var session = new GameSession(_mockValidator, _mockScanner, time);
+    session.StartMatch(new GameRules(timeLimitSeconds: 60f));
+
+    MatchEvent lastEvent = null;
+    session.EventStream.Subscribe(e => lastEvent = e);
+
+    time.ElapsedSeconds = 61f;
+    session.Tick(); // Application-layer tick, not Unity Update
+
+    Assert.IsInstanceOf<MatchEndEvent>(lastEvent);
+}
+```
+
+---
+
+## CI Integration
+
+Every push to any branch and every PR triggers the full unit test suite. The pipeline fails — and the PR is blocked — if:
+
+- Any EditMode test fails
+- Any PlayMode test fails
+- `dotnet format` reports style violations
+- Any Roslyn analyzer rule fires at error severity
+
+Do not rely on "it worked locally." Always verify with `git push` and watch the pipeline.
+
+---
+
+## Common Mistakes
+
+| Mistake | Problem | Fix |
+|---------|---------|-----|
+| Testing implementation details | Test breaks on refactor even when behaviour is unchanged | Test observable outcomes (`result.IsValid`), not internal method calls |
+| Writing tests after a bug report | The bug already reached production | Write the failing test first, then fix the code (red-green-refactor) |
+| `Time.deltaTime` in domain tests | Test is non-deterministic; flaky on slow CI machines | Inject `ITimeProvider`; control time in tests |
+| Asserting on a mock's internal state | Couples test to implementation | Assert on the output of the system under test, not on mock call counts (unless verifying that a collaborator was notified) |
+| `[Ignore]` without a ticket | Dead tests accumulate and erode confidence | Either fix the test immediately or delete it and open a ticket |
+
+---
+
+## Related Pages
+
+<CardGroup cols={2}>
+  <Card title="Coding Conventions" icon="code" href="/standards/conventions">
+    Naming and formatting rules that apply equally to test files.
+  </Card>
+  <Card title="Approved Patterns" icon="diagram-project" href="/standards/patterns">
+    Constructor injection makes mock substitution straightforward.
+  </Card>
+  <Card title="PR Checklist" icon="circle-check" href="/standards/pr-checklist">
+    The test-related gates every PR must pass before merge.
+  </Card>
+  <Card title="Phase Breakdown" icon="list-check" href="/roadmap/phases">
+    Phase 2 and 3 DoDs that set the coverage baseline for the whole project.
+  </Card>
+</CardGroup>

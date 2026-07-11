@@ -1,0 +1,86 @@
+---
+title: "SET: 3D Edition — What This Project Is"
+sidebarTitle: "Introduction"
+description: "A pre-production Unity Android game that adapts the classic SET card game into a premium 3D digital board game with AI, online, and local multiplayer modes."
+---
+
+SET: 3D Edition is a mobile Android game built in Unity that transforms the beloved analog pattern-recognition card game **SET** into a premium, tactile digital board game. Players race in real time to spot valid Sets — groups of three cards where each of the four attributes is either all the same or all different across the trio — before their opponents can claim them first. The project is currently in **pre-production**: the architecture, rules, and design are fully specified, but most features have not yet been implemented in code.
+
+<Warning>
+**Pre-production project.** SET: 3D Edition does not yet have a playable build. All features described in this documentation are **planned** unless a page explicitly states otherwise. Designs, API surfaces, and technical decisions may change as development progresses.
+</Warning>
+
+## Why this documentation exists
+
+This documentation exists to give every engineer on the project — junior or intermediate Unity/C# developer — a single, authoritative source of truth covering game rules, architecture decisions, coding conventions, and task breakdowns. Rather than scattering context across GDD PDFs, Slack threads, and whiteboard photos, these pages consolidate what you need to understand the project and start contributing without guessing.
+
+## Who this is for
+
+These docs are written for **junior-to-intermediate Unity/C# developers** who are already comfortable writing MonoBehaviours and C# classes but may not yet have experience with reactive programming (R3), server-authoritative multiplayer (Nakama), or Clean Architecture patterns. Wherever a concept is more advanced, the relevant page links you to deeper reading.
+
+## Project summary
+
+| Attribute | Detail |
+|---|---|
+| **Deck** | 81 unique cards — every combination of 4 attributes × 3 values |
+| **Attributes** | Number (1/2/3), Shape (Diamond/Squiggle/Oval), Color (Red/Green/Purple), Shading (Solid/Striped/Open) |
+| **Core objective** | Find valid Sets of 3 cards before opponents; player with the most Sets at game end wins |
+| **Session length** | 5–12 minutes per match |
+| **Target platform** | Android (primary) — phones and tablets |
+| **Orientation** | Landscape forced in-match; portrait + landscape for all menus |
+
+## Game modes <span style={{color: "#888", fontSize: "0.85em"}}>(all Planned)</span>
+
+<CardGroup cols={3}>
+  <Card title="Single Player vs AI" icon="robot">
+    Compete against a rule-based AI opponent across Practice, Campaign, and Daily Challenge sub-modes with four difficulty tiers.
+  </Card>
+  <Card title="Online Multiplayer" icon="globe">
+    2–4 players in server-authoritative real-time matches via Nakama — Quick Match, Ranked, Private Rooms, and Tournaments.
+  </Card>
+  <Card title="Pass & Play" icon="mobile">
+    2–8 players on a single device, fully offline. Color-coded claim zones let everyone race simultaneously at the table.
+  </Card>
+</CardGroup>
+
+## Technology stack
+
+| Technology | Role |
+|---|---|
+| **Unity 2022 LTS** | 3D client engine — rendering, input, asset management |
+| **C#** | All game logic and application code |
+| **Clean Architecture** | Strict layer separation: Domain → Application → Presentation → Infrastructure |
+| **R3 (Cysharp)** | Reactive framework replacing raw C# events for all UI state and match event propagation |
+| **VContainer** | Dependency injection container for composition root wiring |
+| **Nakama** | Backend for multiplayer, matchmaking, leaderboards, cloud save, and social features |
+| **Newtonsoft.Json** | JSON serialisation for local save and network message payloads |
+
+## Core design pillars
+
+| Pillar | What it means in practice |
+|---|---|
+| **Speed & Clarity** | Instant visual feedback on every tap; no perceptible lag between recognition and action |
+| **Fairness** | Server-validated claims in online play; AI that feels competitive but not exploitative |
+| **Tactility** | 3D cards feel physical — they lift, glow, spin, and snap back to the table |
+| **Accessibility** | Colorblind modes, shape-assist overlays, adjustable card sizes, and text-to-speech support |
+
+## Explore the project
+
+<CardGroup cols={2}>
+  <Card title="Understand the Rules" icon="book" href="/game-design/rules">
+    The complete, implementation-ready rules for the SET card game — deck, validation algorithm, board logic, and every edge case.
+  </Card>
+  <Card title="Learn the Architecture" href="/architecture/overview" icon="diagram-project">
+    How Clean Architecture, R3, Nakama, and VContainer fit together across the four layers of the codebase.
+  </Card>
+  <Card title="Follow the Roadmap" href="/roadmap" icon="map">
+    Phased delivery plan from vertical slice through full social layer and monetisation.
+  </Card>
+  <Card title="Start Contributing" href="/onboarding/prerequisites" icon="code">
+    Environment setup, coding standards, branching conventions, and your first task.
+  </Card>
+</CardGroup>
+
+<Note>
+**Common mistake:** Treating this as a "puzzle app" rather than a digital board game. The positioning as a **digital board game** (round structure, social scaffolding, 3D table presence) drives a large number of architecture and UX decisions throughout the project. Keep that framing in mind as you read.
+</Note>

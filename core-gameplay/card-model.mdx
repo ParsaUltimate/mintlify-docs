@@ -1,0 +1,262 @@
+---
+title: "Card Model: Attributes, Identity, and Domain Objects"
+sidebarTitle: "Card Model"
+description: "The Card value object, CardAttributes struct, attribute enums, CardId encoding, and how cards flow through the SET: 3D Edition domain model."
+---
+
+
+
+Every piece of gameplay in SET: 3D Edition — board layout, Set validation, AI scanning, scoring — ultimately references a single primitive: the `Card`. Understanding how `Card` is modeled, why it is immutable, and how its compact `CardId` encoding works is the prerequisite for every other system in this documentation.
+
+<Info>
+**Pre-production notice.** SET: 3D Edition is in pre-production. All class shapes, encoding formulas, and invariants described here reflect the current design specification. Signatures may shift before the first playable build.
+</Info>
+
+## Why the Card Is a Value Object
+
+In object-oriented design, an **entity** has identity that exists independently of its data — two `Player` objects can have the same score yet be different players. A **value object** is the opposite: its identity *is* its data. Two values with the same fields are, by definition, the same thing.
+
+`Card` is a value object. A card with `Number.Two, Shape.Oval, Color.Green, Shading.Striped` is that card — universally, unambiguously. There is no concept of "the original" versus "a copy." This has three practical consequences for your implementation:
+
+1. **No mutable state.** Once constructed, a `Card` never changes. Any operation that needs a "different card" creates a new object; it does not modify an existing one.
+2. **Free sharing.** The same `Card` instance can be referenced simultaneously by the `Deck`, the `Board`, a `Player`'s collected-sets list, and the `SetValidator` with no risk of accidental mutation.
+3. **Value equality.** `card1.Equals(card2)` must be true when their attributes match — not when they share the same heap address.
+
+---
+
+## The Attribute Enums and CardAttributes Struct
+
+The four attributes are each defined as a C# `enum`. The underlying integer values are intentional: they feed the `CardId` encoding formula described in the next section.
+
+```csharp
+public enum Number  { One = 1, Two = 2, Three = 3 }
+public enum Shape   { Diamond = 0, Squiggle = 1, Oval = 2 }
+public enum Color   { Red = 0, Green = 1, Purple = 2 }
+public enum Shading { Solid = 0, Striped = 1, Open = 2 }
+
+/// <summary>
+/// Bundles the four card attributes into a single stack-allocated struct.
+/// Passed by value; safe to copy freely.
+/// </summary>
+public readonly struct CardAttributes
+{
+    public Number  Number  { get; }
+    public Shape   Shape   { get; }
+    public Color   Color   { get; }
+    public Shading Shading { get; }
+
+    public CardAttributes(Number number, Shape shape, Color color, Shading shading)
+    {
+        Number  = number;
+        Shape   = shape;
+        Color   = color;
+        Shading = shading;
+    }
+}
+```
+
+`CardAttributes` is a `readonly struct` — the `readonly` modifier prevents any field from being reassigned after construction, even inside the struct itself. This is the correct choice for a four-field bundle that is copied frequently and never mutated.
+
+---
+
+## The Card Class
+
+```csharp
+/// <summary>
+/// Immutable value object. Identity is defined entirely by the four attributes.
+/// Implements IEquatable&lt;Card&gt; for value-based equality.
+/// </summary>
+public sealed class Card : IEquatable<Card>
+{
+    /// <summary>Unique index 0–80. Encodes all four attributes.</summary>
+    public CardId Id { get; }
+
+    /// <summary>The four attribute values.</summary>
+    public CardAttributes Attributes { get; }
+
+    public Card(CardId id, CardAttributes attributes)
+    {
+        Id         = id;
+        Attributes = attributes;
+    }
+
+    // Equality is by Id — equivalent to comparing all four attributes
+    public bool Equals(Card? other) => other is not null && Id == other.Id;
+    public override bool Equals(object? obj) => obj is Card c && Equals(c);
+    public override int GetHashCode() => Id.GetHashCode();
+}
+```
+
+The class is `sealed` (no subclassing) and exposes only `get`-only properties. There are no setters, no internal mutation methods, and no static factory beyond the constructor. Equality delegates to `Id`, which is valid because every `Id` maps to exactly one attribute combination.
+
+---
+
+## The 81-Card Universe
+
+The deck contains exactly **81 unique cards** — one for every combination of 3 values × 4 attributes (3⁴ = 81). Cards are **never created at runtime during a match**. They are generated once at deck-initialisation time, placed into a `Queue<Card>`, and then consumed (drawn) or placed (dealt) without ever being constructed again.
+
+| Attribute | Values |
+|-----------|--------|
+| Number | One, Two, Three |
+| Shape | Diamond, Squiggle, Oval |
+| Color | Red, Green, Purple |
+| Shading | Solid, Striped, Open |
+
+Every possible row from this table exists exactly once in the deck. The `Deck` constructor loops through all combinations in a deterministic order, constructs 81 `Card` objects, and shuffles them with a seeded `System.Random`. After that, the 81 instances are fixed for the lifetime of the match.
+
+---
+
+## CardId Encoding Formula
+
+`CardId` is an `int` in the range **0–80** computed by the following formula:
+
+```
+Id = (Number - 1) * 27
+   + (int)Shape   *  9
+   + (int)Color   *  3
+   + (int)Shading
+```
+
+Because `Number` uses 1-based values (`One = 1, Two = 2, Three = 3`), the formula subtracts 1 to produce a 0-based contribution. The other three enums are already 0-based (`Diamond = 0`, `Red = 0`, `Solid = 0`).
+
+**Example — the card Two Squiggles Green Striped:**
+
+| Attribute | Value | Enum int | Contribution |
+|-----------|-------|----------|--------------|
+| Number | Two | 2 − 1 = 1 | 1 × 27 = 27 |
+| Shape | Squiggle | 1 | 1 × 9 = 9 |
+| Color | Green | 1 | 1 × 3 = 3 |
+| Shading | Striped | 1 | 1 × 1 = 1 |
+| **Total Id** | | | **40** |
+
+To **reconstruct attributes from an Id** (useful for serialisation and debugging):
+
+```csharp
+public static CardAttributes FromId(int id)
+{
+    int n       = id / 27;          // 0, 1, or 2
+    int s       = (id % 27) / 9;    // 0, 1, or 2
+    int c       = (id % 9)  / 3;    // 0, 1, or 2
+    int sh      = id % 3;           // 0, 1, or 2
+
+    return new CardAttributes(
+        number:  (Number)(n + 1),   // back to 1-based
+        shape:   (Shape)s,
+        color:   (Color)c,
+        shading: (Shading)sh
+    );
+}
+```
+
+This encoding is compact (one byte if stored as `byte`), deterministic, and enables fast bitwise operations in `SetValidator` — specifically, the all-same / all-different check can be implemented with integer arithmetic rather than branching enum comparisons, which keeps validation well under 10 µs per call.
+
+---
+
+## Related Domain Objects
+
+`Card` does not exist in isolation. Three other types form the immediate context:
+
+### CardSlot
+
+```csharp
+/// <summary>
+/// A fixed position on the Board that may be occupied by a Card.
+/// Null Card means the slot is empty (post-Set removal, or deck exhausted).
+/// </summary>
+public readonly struct CardSlot
+{
+    public int   Index { get; }   // 0-based position in the grid
+    public Card? Card  { get; }   // null = empty slot
+}
+```
+
+`CardSlot.Index` is a **board position index** (0–20). Do not confuse it with `Card.Id` (an attribute encoding). A card with `Id = 40` can occupy any slot; the slot index is purely a layout concern.
+
+### Deck
+
+```csharp
+public sealed class Deck
+{
+    // Internally uses a Queue<Card> populated at construction time
+    public int CardsRemaining { get; }
+    public IReadOnlyList<Card> Draw(int count); // removes and returns top N cards
+}
+```
+
+The `Deck` constructor generates all 81 `Card` instances, applies a Fisher–Yates shuffle using a provided seed (`0` = non-deterministic), and stores them in draw order. No card is ever added back to the deck.
+
+### Board
+
+```csharp
+public sealed class Board
+{
+    public IReadOnlyList<CardSlot> Slots { get; }     // 12 to 21 slots
+    public Card?  GetCard(int slotIndex);
+    public void   PlaceCard(int slotIndex, Card card);
+    public void   RemoveCard(int slotIndex);
+    public IReadOnlyList<int> GetEmptySlots();
+    public void   Expand(int additionalSlots);        // adds 3 at a time, max 21
+}
+```
+
+`Board` stores `CardSlot` values, not raw `Card` references, so that empty positions are first-class. `GameSession` orchestrates all transfers: draw from `Deck`, place into `Board`, remove from `Board` after a valid Set.
+
+---
+
+## Implementation Checklist
+
+<Steps>
+  <Step title="Sealed class with IEquatable">
+    `Card` must be `sealed` and implement `IEquatable<Card>`. Override both `Equals(Card?)` and `Equals(object?)`, and override `GetHashCode()` to return `Id.GetHashCode()`.
+  </Step>
+  <Step title="Value equality by Id">
+    `card1.Equals(card2)` returns `true` when both have the same `Id`. Because every Id maps to a unique attribute combination, this is equivalent to comparing all four attributes individually.
+  </Step>
+  <Step title="No mutable state">
+    All properties must be `get`-only. There must be no `set`, `init`, or any method that modifies a field after construction. Use `readonly` backing fields.
+  </Step>
+  <Step title="CardId encoding formula applied correctly">
+    Verify that `(Number - 1) * 27 + Shape * 9 + Color * 3 + Shading` produces a value in [0, 80] for every valid attribute combination. Write a unit test that round-trips all 81 Ids through `FromId()` and confirms the attributes match.
+  </Step>
+  <Step title="Build-time test: all 81 cards present">
+    Write a unit test (or editor test) that generates all 81 `Card` objects, stores them in a `HashSet<Card>`, and asserts `Count == 81`. If any duplicate slips through — either from a wrong Id formula or from a broken `Equals` — the set count will be less than 81.
+  </Step>
+</Steps>
+
+---
+
+## Common Mistakes
+
+<Warning>
+**Mixing up `Card.Id` and `CardSlot.Index`.**
+`Card.Id` (0–80) encodes the card's attributes and is permanently tied to the card. `CardSlot.Index` (0–20) is a board position that can hold any card. A card with `Id = 40` sitting in slot 3 has `Id = 40` and occupies slot index 3 — these are independent values.
+</Warning>
+
+<Warning>
+**Comparing Cards by reference.**
+Never write `if (cardA == cardB)` for reference equality on a `class`. Always use `.Equals()` or implement the `==` operator to delegate to `Equals`. Otherwise two `Card` objects representing the same game card will incorrectly compare as unequal.
+</Warning>
+
+<Warning>
+**Making Card mutable.**
+Adding a `set` accessor to any `Card` property — even `private set` — breaks the value-object contract. Other systems cache `Card` references assuming the data will never change. Any mutation silently corrupts game state across all collections that share the reference.
+</Warning>
+
+---
+
+## Related Pages
+
+<CardGroup cols={2}>
+  <Card title="Set Validation" href="/core-gameplay/set-validation">
+    How SetValidator uses CardAttributes to enforce the all-same / all-different rule.
+  </Card>
+  <Card title="Board & Dealing" href="/core-gameplay/board-and-dealing">
+    How Board manages CardSlots, refills empty positions, and expands when no Set exists.
+  </Card>
+  <Card title="Session Lifecycle" href="/core-gameplay/session-lifecycle">
+    How GameSession orchestrates the Deck, Board, and Cards through the full match state machine.
+  </Card>
+  <Card title="AI Opponents" href="/core-gameplay/ai-opponents">
+    How AIScanner scans the Board's Cards to find and claim Sets.
+  </Card>
+</CardGroup>

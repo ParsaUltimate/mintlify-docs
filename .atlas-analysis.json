@@ -1,0 +1,144 @@
+{
+  "projectType": "general",
+  "projectName": "SET: 3D Edition",
+  "projectDescription": "A planned Android-focused 3D adaptation of the classic SET pattern-matching card game, built with Unity 2022 LTS, Clean Architecture, reactive R3 UI, and Nakama server-authoritative multiplayer.",
+  "theme": "aspen",
+  "primaryColor": "#7C3AED",
+  "lightColor": "#A78BFA",
+  "darkColor": "#3B0764",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Game & Design",
+        "groups": [
+          {
+            "group": "Welcome",
+            "pages": [
+              "welcome/introduction",
+              "welcome/glossary"
+            ]
+          },
+          {
+            "group": "Game Design",
+            "pages": [
+              "game-design/concept",
+              "game-design/rules",
+              "game-design/modes",
+              "game-design/accessibility"
+            ]
+          },
+          {
+            "group": "Developer Onboarding",
+            "pages": [
+              "onboarding/prerequisites",
+              "onboarding/repo-tour",
+              "onboarding/first-tasks"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Architecture",
+        "groups": [
+          {
+            "group": "System Design",
+            "pages": [
+              "architecture/overview",
+              "architecture/layers",
+              "architecture/asmdefs",
+              "architecture/di-vcontainer",
+              "architecture/reactive-ui"
+            ]
+          },
+          {
+            "group": "Core Gameplay",
+            "pages": [
+              "core-gameplay/card-model",
+              "core-gameplay/set-validation",
+              "core-gameplay/board-and-dealing",
+              "core-gameplay/session-lifecycle",
+              "core-gameplay/ai-opponents"
+            ]
+          },
+          {
+            "group": "Multiplayer",
+            "pages": [
+              "multiplayer/authority-model",
+              "multiplayer/match-lifecycle",
+              "multiplayer/sync-and-reconnect",
+              "multiplayer/anti-cheat"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Roadmap & Standards",
+        "groups": [
+          {
+            "group": "Implementation Roadmap",
+            "pages": [
+              "roadmap/overview",
+              "roadmap/phases"
+            ]
+          },
+          {
+            "group": "Engineering Standards",
+            "pages": [
+              "standards/conventions",
+              "standards/patterns",
+              "standards/testing",
+              "standards/pr-checklist"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/glossary",
+              "reference/data-formats",
+              "reference/faq"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Classic SET gameplay: 81 unique cards, 4 attributes × 3 values, all-same/all-different validation rule",
+    "Single Player modes: Practice, Campaign, Daily Challenge, vs AI (4 difficulty tiers: Easy/Medium/Hard/Expert)",
+    "Online Multiplayer: Quick Match, Ranked, Private Rooms, Tournaments via Nakama server-authoritative backend",
+    "Pass & Play local multiplayer: 2–8 players on a single device, tap-zone and turn-assist modes",
+    "3D card presentation with idle animations, haptic feedback, and distinct visual states per card",
+    "Accessibility: colorblind mode, shape-assist, adjustable card sizes (S/M/L), screen-reader support",
+    "Clean Architecture with strict layer separation: Domain → Application → Infrastructure → Presentation",
+    "R3 reactive UI — all game state flows via observables, no polling in Update()",
+    "VContainer constructor injection throughout; zero FindObjectOfType or static singletons",
+    "Server-authoritative multiplayer: client submits intent only; Nakama validates Sets and broadcasts results",
+    "Cosmetic-only monetization: table skins, card backs, symbol packs — no pay-to-win",
+    "Deterministic SetValidator shared between client and server for guaranteed logic consistency",
+    "AI Scanner with configurable reaction delay and miss rate per difficulty tier",
+    "Assembly definitions (asmdefs) enforcing compile-time layer boundaries",
+    "Planned features across 13 development phases over ~22–26 weeks"
+  ],
+  "publicApiSurface": [
+    "ISetValidator.Validate(IReadOnlyList<Card> threeCards) → SetResult",
+    "ISetValidator.FindAllSets(IReadOnlyList<Card> boardCards) → IReadOnlyList<Card[]>",
+    "ISetValidator.AnySetExists(IReadOnlyList<Card> boardCards) → bool",
+    "IMatchOrchestrator.StartMatch(GameRules rules, Player[] players, Deck initialDeck)",
+    "IMatchOrchestrator.HandleCommand(IGameCommand command)",
+    "IGameStateProvider.StateStream → IObservable<GameStateSnapshot>",
+    "IGameStateProvider.EventStream → IObservable<MatchEvent>",
+    "IInputHandler.CommandStream → IObservable<IGameCommand>",
+    "IMultiplayerService.SendClaim(int[] cardIds)",
+    "IMultiplayerService.Messages → IObservable<ServerMessage>",
+    "ILeaderboardService.GetTopEntries(string leaderboardId, int count) → Task<LeaderboardEntry[]>",
+    "ILeaderboardService.SubmitScore(string leaderboardId, long score)",
+    "ILocalSaveService.SaveAsync<T>(string key, T data)",
+    "ILocalSaveService.LoadAsync<T>(string key) → Task<T>",
+    "IAIScanner.StartScan(IReadOnlyList<Card> boardCards, AIDifficulty difficulty, Action<Card[]> onSetFound)",
+    "GameSession commands: SelectCardCommand, DeselectCardCommand, ClaimSelectedCommand",
+    "GameSession events: SetClaimedEvent, BoardRefilledEvent, BoardExpandedEvent, ScoreChangedEvent, MatchEndedEvent",
+    "MatchState enum: BoardIdle, CardSelected1, CardSelected2, Validating, ValidSetAnim, InvalidSetAnim, RefillAnim, ExpandBoardAnim, MatchEnd",
+    "CardAttributes enums: Number (One/Two/Three), Shape (Diamond/Squiggle/Oval), Color (Red/Green/Purple), Shading (Solid/Striped/Open)",
+    "GameRules: InitialBoardSize, MaxBoardSize (21), PenaltyMode (None/Time/Point), IsTimed, TimeLimitSeconds"
+  ]
+}

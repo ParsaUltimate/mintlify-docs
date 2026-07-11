@@ -1,0 +1,329 @@
+---
+title: "Data Formats, JSON Config Files, and Save File Schemas"
+sidebarTitle: "Data Formats"
+description: "Reference for all JSON config files, the local save schema, network message envelope, and CardId encoding formula used in SET: 3D Edition."
+---
+
+Every system that reads or writes data in SET: 3D Edition — config loading, save migration, network serialization, IAP validation — depends on a shared understanding of these formats. This page is the single reference for all of them. If you are writing a loader, a migration function, or a network handler, start here.
+
+<Note>
+  **Pre-production status.** These formats are fully designed and agreed upon, but the Unity code to read, write, and migrate them is built incrementally across Phases 1–10 of the implementation roadmap. When you implement a system, treat this page as the specification the code must conform to — not the other way around.
+</Note>
+
+---
+
+## Card Identity Encoding
+
+The 81 cards are **procedurally generated** at runtime — there is no static JSON file listing each card. The four attribute enums fully define the card set. A build-time validation test confirms exactly 81 unique cards are produced with no duplicates.
+
+### Attribute Enums
+
+```csharp
+public enum Number  { One = 1, Two = 2, Three = 3 }
+public enum Shape   { Diamond = 0, Squiggle = 1, Oval = 2 }
+public enum Color   { Red = 0, Green = 1, Purple = 2 }
+public enum Shading { Solid = 0, Striped = 1, Open = 2 }
+```
+
+Note that `Number` starts at `1`, while all other enums start at `0`. This matters for the encoding formula.
+
+### CardId Formula
+
+```
+Id = (Number - 1) * 27 + Shape * 9 + Color * 3 + Shading
+```
+
+This produces a unique integer in the range **0–80** for every card. The formula is used in network messages and save files as a compact card reference.
+
+**Examples:**
+
+| Card | Number | Shape | Color | Shading | CardId |
+|------|--------|-------|-------|---------|--------|
+| One Red Solid Diamond | 1 | 0 | 0 | 0 | `0` |
+| One Red Solid Squiggle | 1 | 1 | 0 | 0 | `9` |
+| Three Purple Open Oval | 3 | 2 | 2 | 2 | `80` |
+
+### Decoding a CardId
+
+Given an integer `n` in range 0–80:
+
+```csharp
+int shading = n % 3;
+int color   = (n / 3) % 3;
+int shape   = (n / 9) % 3;
+int number  = (n / 27) + 1;   // +1 because Number enum starts at 1
+```
+
+---
+
+## AI Difficulty Config
+
+**File:** `Assets/_Project/Data/ai_difficulty.json`
+
+Controls the timing and error-rate parameters for each AI difficulty tier. Designers can edit this file to tune feel without touching code.
+
+```json
+{
+  "Easy":   { "minDelaySec": 4.0, "maxDelaySec": 8.0,  "missRate": 0.20, "falseStartRate": 0.10 },
+  "Medium": { "minDelaySec": 2.0, "maxDelaySec": 4.0,  "missRate": 0.10, "falseStartRate": 0.05 },
+  "Hard":   { "minDelaySec": 0.8, "maxDelaySec": 2.0,  "missRate": 0.02, "falseStartRate": 0.02 },
+  "Expert": { "minDelaySec": 0.3, "maxDelaySec": 0.8,  "missRate": 0.00, "falseStartRate": 0.01 }
+}
+```
+
+**Field definitions:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `minDelaySec` | float | Minimum seconds the AI waits before claiming a Set it has identified |
+| `maxDelaySec` | float | Maximum wait; actual delay is a random value in `[min, max]` |
+| `missRate` | float (0–1) | Probability the AI intentionally submits an invalid Set (simulates a wrong guess) |
+| `falseStartRate` | float (0–1) | Probability the AI begins selecting cards then abandons the claim |
+
+**Validation rules enforced at runtime:**
+- `minDelaySec` must be ≤ `maxDelaySec`
+- All rate fields must be in the range `[0.0, 1.0]`
+- A missing tier falls back to the `Medium` values — it does not throw
+
+---
+
+## Game Rules Presets
+
+**File:** `Assets/_Project/Data/game_rules_presets.json`
+
+Named presets for the four standard match configurations. Private Room hosts can override individual fields from one of these presets.
+
+```json
+{
+  "classic":  { "initialBoardSize": 12, "penaltyMode": "Point", "timed": false, "timeLimitSec": 0   },
+  "quick":    { "initialBoardSize": 12, "penaltyMode": "None",  "timed": true,  "timeLimitSec": 300 },
+  "relaxed":  { "initialBoardSize": 15, "penaltyMode": "None",  "timed": false, "timeLimitSec": 0   },
+  "hardcore": { "initialBoardSize": 12, "penaltyMode": "Time",  "timed": true,  "timeLimitSec": 180 }
+}
+```
+
+**Field definitions:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `initialBoardSize` | int | Number of cards dealt at game start; must be 12, 15, or 18 |
+| `penaltyMode` | string | `"None"` \| `"Time"` \| `"Point"` |
+| `timed` | bool | Whether the match has a global countdown timer |
+| `timeLimitSec` | int | Total seconds for the global timer; ignored when `timed` is `false` |
+
+These preset names map directly to the `GameRules` value object. The loader deserialises the JSON into a `GameRulesDto` and then constructs an immutable `GameRules` instance.
+
+---
+
+## Local Save Schema
+
+**File:** `Application.persistentDataPath/set3d_save.json`
+
+The local save is a single JSON file written with **Newtonsoft.Json**. It is versioned: the `version` integer increments with every schema change, and `MigrationRunner.Run(save)` is called on load whenever the saved version is lower than the application's `CURRENT_VERSION`.
+
+```json
+{
+  "version": 1,
+  "settings": {
+    "musicVolume": 0.8,
+    "sfxVolume": 1.0,
+    "voiceCallouts": true,
+    "colorblindMode": false,
+    "shapeAssist": false,
+    "cardSize": "Medium",
+    "haptics": true,
+    "cameraStyle": "TopDown"
+  },
+  "profile": {
+    "displayName": "PlayerOne",
+    "avatarId": "default"
+  },
+  "stats": {
+    "gamesPlayed": 0,
+    "setsFound": 0,
+    "winRate": 0.0,
+    "avgFindTimeMs": 0,
+    "bestStreak": 0,
+    "matchHistory": []
+  },
+  "unlockedCosmetics": ["table_felt", "cardback_blue"],
+  "equippedCosmetics": {
+    "tableSkin": "table_wood",
+    "cardBack": "cardback_default",
+    "symbolPack": "symbol_default"
+  },
+  "campaignProgress": {
+    "currentLevel": 1,
+    "completedLevels": []
+  }
+}
+```
+
+### Cloud vs Local Sync
+
+Not all sections are synced to Nakama cloud storage. The `settings` block is device-local only:
+
+| Section | Local save | Cloud sync |
+|---------|-----------|------------|
+| `settings` | ✅ | ❌ |
+| `profile` | ✅ | ✅ |
+| `stats` | ✅ | ✅ |
+| `unlockedCosmetics` | ✅ | ✅ |
+| `equippedCosmetics` | ✅ | ✅ |
+| `campaignProgress` | ✅ | ✅ |
+
+Cloud saves are written to Nakama's storage with collection `"player_save"` and key `"profile"`.
+
+### Schema Versioning & Migration
+
+```csharp
+if (save.version < CURRENT_VERSION)
+{
+    MigrationRunner.Run(save);
+    save.version = CURRENT_VERSION;
+}
+```
+
+Each migration function is a simple transformer. Examples:
+- **v1 → v2:** Add default value for `shapeAssist` (new field).
+- **v2 → v3:** Rename `avgFindTime` → `avgFindTimeMs`.
+
+If the saved version is **higher** than the application's `CURRENT_VERSION` (downgrade scenario), the file is ignored and a fresh default save is created, with a warning logged.
+
+<Warning>
+  **Always increment `version`** when you add, remove, or rename a field in this schema, and write the corresponding migration function. Forgetting this step corrupts saves silently for users upgrading from an older version.
+</Warning>
+
+### Save Integrity
+
+A **CRC32 or SHA-256 checksum** is appended to the local save file. On load, if the checksum does not match, the file is treated as corrupt: the corrupted file is moved to `set3d_save.json.bak` and a fresh default save is created. For cloud saves, integrity is guaranteed by Nakama's own storage layer.
+
+---
+
+## Network Message Format
+
+All client–Nakama communication uses **JSON**. This keeps debugging straightforward and meets performance requirements since match state messages are small (under 1 KB).
+
+### Client → Server (Action)
+
+```json
+{ "type": "match_claim", "seq": 1, "data": { "cardIds": [12, 37, 58] } }
+```
+
+`cardIds` contains exactly three `CardId` values (0–80). The server validates the claim independently — the client never asserts that a claim is valid.
+
+### Server → Client (State Broadcast)
+
+```json
+{
+  "type": "match_state",
+  "seq": 2,
+  "data": {
+    "board": [0, 9, 18, 27, 36, 45, 54, 63, 72, 3, 12, 21],
+    "scores": { "player_0": 2, "player_1": 1 },
+    "deckCount": 51
+  }
+}
+```
+
+`board` is an ordered array of `CardId` values (or `null` for empty slots), matching the slot indices 0–20.
+
+**Serialization notes:**
+- Fields are serialized in a defined order using `[JsonProperty(Order = X)]` attributes to allow future checksumming.
+- Use **Newtonsoft.Json** with dedicated DTO classes for network messages — not `JsonUtility`, which cannot handle nullable types or nested objects reliably.
+- If performance or bandwidth becomes a concern in future phases, the format can be migrated to **MessagePack** (Nakama supports custom serializers) without changing the message schema.
+
+---
+
+## Cosmetics Catalogue
+
+**File:** `Assets/_Project/Data/cosmetics_catalogue.json`
+
+Defines all purchasable and unlockable cosmetic items. Each entry references a Unity Addressables key.
+
+```json
+{
+  "id": "table_wood",
+  "type": "table_skin",
+  "displayName": "Classic Oak",
+  "assetKey": "Tables/Wood",
+  "price": { "currency": "USD", "amount": 0.99 }
+}
+```
+
+**Field definitions:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique identifier; used in `equippedCosmetics` and `unlockedCosmetics` in the save file |
+| `type` | string | `"table_skin"` \| `"card_back"` \| `"symbol_pack"` |
+| `displayName` | string | Human-readable name shown in the Store UI |
+| `assetKey` | string | Unity Addressables key; must resolve at build time |
+| `price.currency` | string | `"USD"` for real-money IAP, `"soft"` for in-game soft currency |
+| `price.amount` | number | Price in the given currency |
+
+The build-time validation pipeline verifies that every `assetKey` in this catalogue resolves to a valid Addressables entry. A missing asset is a **build error**, not a runtime warning.
+
+---
+
+## Localization Strings
+
+**File:** `Assets/_Project/Data/strings.json`
+
+All user-facing strings are keyed even though v1.0 ships English-only. This avoids code changes when localization is added in a future version.
+
+```json
+{
+  "ui.play": "Play",
+  "ui.settings": "Settings",
+  "game.set_found": "SET!",
+  "game.no_set": "No Set — dealing 3 more cards"
+}
+```
+
+A `LocalizationService` resolves keys to the current-language string. Use `LocalizationService.Get("game.set_found")` in code, never a raw string literal.
+
+---
+
+## Serialization Quick Reference
+
+| Concern | Tool | Notes |
+|---------|------|-------|
+| Local save | Newtonsoft.Json | `[JsonProperty]` attributes on all DTO fields |
+| Network messages | Newtonsoft.Json | Dedicated message DTOs; no domain objects directly |
+| Config files | Newtonsoft.Json | Loaded at startup; validated before use |
+| Small Unity payloads | `JsonUtility` | Only for simple, flat structs — not save or network data |
+
+### Common Mistakes
+
+<AccordionGroup>
+  <Accordion title="Using JsonUtility for complex or nested objects">
+    `JsonUtility` does not support `Dictionary<,>`, nullable types, or polymorphic lists. Use **Newtonsoft.Json** for any object that has nested structures, nullable fields, or dictionary keys. Reserve `JsonUtility` for simple, flat value types only.
+  </Accordion>
+  <Accordion title="Forgetting to increment `version` after a save schema change">
+    Every time you add, remove, or rename a field in `set3d_save.json`, you **must** increment `CURRENT_VERSION` in code and add a migration step in `MigrationRunner`. Skipping this silently corrupts saves for users upgrading from an earlier app version.
+  </Accordion>
+  <Accordion title="Omitting the CRC checksum step on save">
+    The save integrity system only catches corruption if the checksum is written on every save. If your code writes to `set3d_save.json` via any path that bypasses the `SaveManager`, the checksum will be stale and the next load will discard valid data. Always save through `SaveManager.Save()`.
+  </Accordion>
+  <Accordion title="Sending CardIds outside the 0–80 range">
+    Network message handlers on both client and server must validate that every `CardId` in a `cardIds` array is in `[0, 80]`. Values outside this range indicate a client bug or a tampered message. The server rejects claims with out-of-range IDs.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Glossary" icon="book" href="/reference/glossary">
+    Definitions for CardId, CardAttributes, GameRules, PenaltyMode, and every other term in the codebase.
+  </Card>
+  <Card title="FAQ" icon="circle-question" href="/reference/faq">
+    Why Newtonsoft.Json over JsonUtility? Why server-authoritative validation? Answered here.
+  </Card>
+  <Card title="Card Model" icon="rectangle-card" href="/core-gameplay/card-model">
+    How Cards and CardAttributes are constructed from attribute enums.
+  </Card>
+  <Card title="Multiplayer Authority Model" icon="server" href="/multiplayer/authority-model">
+    How the server validates claims and why clients never self-report valid Sets.
+  </Card>
+</CardGroup>
